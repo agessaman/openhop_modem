@@ -29,6 +29,7 @@ import zipfile
 from pathlib import Path
 
 from firmware_envs import discover_release_envs
+from experimental_assets import collect_experimental
 from nrf52_flash_layout import validate_rak4631_board, validate_rak4631_size
 from nrf52_uf2 import uf2_conversion_command
 from package_nrf52_ota import (
@@ -265,6 +266,17 @@ def select_envs(requested: str, all_envs: list[str], base: str | None, head: str
     return []
 
 
+def select_build_envs(requested: str, allow_experimental: bool,
+                      base: str | None, head: str | None) -> list[str]:
+    eligible = discover_envs()
+    # Opt-in widens only an explicit list; never public all/auto selection.
+    if allow_experimental and requested.strip() not in ("all", "auto"):
+        config = configparser.ConfigParser(interpolation=None)
+        config.read(PLATFORMIO_INI)
+        eligible = [name[4:] for name in config.sections() if name.startswith("env:")]
+    return select_envs(requested, eligible, base, head)
+
+
 def pio_executable(cli_value: str | None) -> str:
     if cli_value:
         return cli_value
@@ -468,10 +480,28 @@ def main() -> int:
     parser.add_argument("--pio", default=None, help="Path to PlatformIO executable")
     parser.add_argument("--clean", action="store_true", help="Run pio clean before building")
     parser.add_argument("--plan", action="store_true", help="Only print selected envs; do not build")
+    parser.add_argument("--allow-experimental", action="store_true",
+                        help="Allow explicitly named custom_release=false envs; never widens all/auto")
+    parser.add_argument("--output-dir", type=Path,
+                        help="New external package root (required for experimental targets)")
     args = parser.parse_args()
 
-    all_envs = discover_envs()
-    selected = select_envs(args.variant, all_envs, args.changed_from, args.changed_to)
+    selected = select_build_envs(args.variant, args.allow_experimental,
+                                 args.changed_from, args.changed_to)
+    experimental = set(selected) - set(discover_envs())
+    if experimental and not args.output_dir:
+        parser.error("Experimental assets require --output-dir outside the source tree")
+    if args.output_dir:
+        args.output_dir = args.output_dir.resolve()
+        if args.output_dir.is_relative_to(ROOT):
+            parser.error("--output-dir must be outside the source tree")
+        if not experimental or experimental != set(selected):
+            parser.error("--output-dir currently supports only explicit experimental targets")
+        for env in selected:
+            if env != "heltec_v42_usb_eth":
+                parser.error(f"No experimental packaging contract for {env}")
+            if (args.output_dir / env).exists():
+                parser.error(f"Package already exists: {args.output_dir / env}")
     SELECTED_ENVS_FILE.write_text("\n".join(selected) + ("\n" if selected else ""), encoding="utf-8")
 
     print("Selected envs: " + (", ".join(selected) if selected else "<none>"))
@@ -490,8 +520,20 @@ def main() -> int:
         (FIRMWARE / ".pio/build" / env / "firmware.factory.bin").unlink(
             missing_ok=True
         )
-        run([pio, "run", "-e", env], FIRMWARE)
-        collect_env(env)
+        build_log = run([pio, "run", "-e", env], FIRMWARE)
+        if env in experimental:
+            dest = args.output_dir / env
+            collect_experimental(env, FIRMWARE, dest)
+            (dest / "build.log").write_text(build_log, encoding="utf-8")
+            (dest / "build-command.json").write_text(json.dumps({
+                "assets_argv": sys.argv, "cwd": str(Path.cwd()),
+                "platformio_argv": [pio, "run", "-e", env],
+                "platformio_version": run([pio, "--version"], FIRMWARE).strip(),
+            }, indent=2) + "\n", encoding="utf-8")
+            write_sha256s(dest, sorted(p for p in dest.iterdir()
+                                      if p.is_file() and p.name != "SHA256SUMS.txt"))
+        else:
+            collect_env(env)
     return 0
 
 

@@ -38,9 +38,76 @@ bootloader/partition tables. Do not assume native application USB-CDC remains
 available or that a Wi-Fi reset button can rescue this build. No hardware access,
 flashing, or OTA is part of compile-only validation.
 
-## Build from `firmware/`
+## Supported clean build and packaging
+
+From the repository root, use this **single canonical command** (choose a new,
+absolute output directory outside the checkout):
 
 ```sh
+python3 firmware/tools/build_firmware_assets.py \
+  --variant heltec_v42_usb_eth --allow-experimental --clean \
+  --pio "$HOME/.local/bin/pio" \
+  --output-dir "$HOME/openhop-dev/firmware-test-artifacts/heltec-v42-usb-ecm-supported-build"
+```
+
+The package is written under `<output-dir>/heltec_v42_usb_eth/`. Existing
+packages are refused rather than replaced. `--allow-experimental` applies only
+to explicitly named targets: `all`, `auto`, and the public release ZIP packager
+still exclude this `custom_release=false` environment. Normal `heltec_v42`
+build and release behavior is unchanged.
+
+Outputs:
+- `firmware.bin`: **app-only OTA**, or serial app image at `0x10000`.
+- `firmware.factory.bin`: **factory/recovery image at `0x0`, never HTTP OTA**.
+- `bootloader.bin`, `partitions.bin`, `ota_data_initial.bin`: components at
+  `0x0`, `0x8000`, `0xe000`; manifest includes all four components.
+- `manifest.json`, `SHA256SUMS.txt`, `build-info.json`, SDK config, dependency
+  lock, CMake project description, build command and full PlatformIO log.
+
+**Factory recovery resets OTA selection and can erase NVS/configuration** through
+its `0xff` padding. The runtime's non-erasing behavior does not make a factory
+flash configuration-preserving. App-only OTA requires an already compatible
+bootloader and partition table. Physical flash may be 16 MB, but this target
+intentionally retains its **8 MB configured layout**: `app0=0x10000`,
+`app1=0x340000`, both `0x330000` bytes. Packaging validates the generated table,
+fit, component offsets and flash settings. It constructs a fresh factory image
+from the successful PIO outputs; it never trusts an old merged image.
+
+`build-info.json` uses the app SHA256 as the unique build ID and records the ELF
+hash and a file-by-file source digest. Git revision is null for source exports;
+a revision alone cannot identify dirty worktree content. Runtime version text
+is not a unique build identifier. `idf-flasher-args.json` preserves CMake's
+original names, not staged filenames; use `manifest.json` for staged offsets.
+Verify the package with `sha256sum -c SHA256SUMS.txt` from inside its directory.
+
+### Why fresh PlatformIO builds now work
+
+The pinned pioarduino **53.03.13-1 / Arduino 3.1.3 / IDF 5.3.2** SCons importer
+omits IDF custom generation edges for the Insights HTTPS and three RainMaker
+certificate assembly sources. Project-local CMake now invokes IDF's exact
+embedding generator at configure time, with fatal error propagation and input
+change dependencies. It does not patch installed frameworks, ignore build errors,
+or fall back from arbitrary failures to CMake. Plain `pio run -e
+heltec_v42_usb_eth` produces `.pio/build/heltec_v42_usb_eth/firmware.bin`.
+The asset tool additionally creates the IDF-equivalent blank 8 KiB OTA-data
+component, since SCons does not run IDF's `blank_ota_data` target. The dedicated
+environment explicitly sets `board_build.partitions` to the same custom CSV as
+IDF's SDK defaults: without it SCons emits a default single 1 MB factory-app
+table even though CMake configured dual OTA. Packaging rejects that mismatch.
+
+Use an isolated PlatformIO Python installation; do not bypass PEP 668 or install
+into system Python. Some existing pioarduino installations print nonfatal Python
+install warnings; only a zero PIO exit status allows packaging. Local validation
+uses cached toolchains/downloads, not a completely package-cold installation.
+For a fresh-project check, use a source-only checkout/export with no `.pio`,
+`managed_components`, or generated `sdkconfig.heltec_v42_usb_eth`; retain tracked
+`sdkconfig.defaults`. `--clean` alone cleans build outputs, not all dependencies.
+
+Focused host tests (from `firmware/`):
+
+```sh
+python3 tools/test_experimental_assets.py
+python3 tools/test_idf_embed.py
 python3 tools/test_usb_ecm_network_init.py
 python3 tools/test_usb_ecm_button_init.py
 python3 tools/test_usb_ecm_ethernet_only.py
@@ -48,23 +115,10 @@ python3 tools/test_usb_ecm_management_guards.py
 python3 tools/test_usb_ecm_ota_sanity.py
 python3 tools/test_heltec_v42_usb_ecm.py
 python3 tools/test_usb_ecm_release_scope.py
-pio run -e heltec_v42_usb_eth
-# Pinned pioarduino 53.03.13-1 fails SCons on generated
-# espressif__esp_insights https_server.crt.S, after configuring IDF/CMake.
-IDF_PATH="$HOME/.platformio/packages/framework-espidf" \
-PATH="$HOME/.platformio/packages/toolchain-xtensa-esp-elf/bin:$PATH" \
-cmake --build .pio/build/heltec_v42_usb_eth -j 6
-# App-only image: .pio/build/heltec_v42_usb_eth/openhop_modem.bin
 ```
 
-Use PlatformIO's isolated Python environment rather than installing dependencies
-into a PEP-668-managed system Python. CMake requires `esptool>=4.8,<5` in
-`~/.platformio/penv/.espidf-5.3.2/bin/python`. `pio run` alone does not produce
-the mixed image. This environment is excluded from production release assets.
-
-The custom table preserves `app0=0x10000` and `app1=0x340000`, each `0x330000`
-bytes. App OTA requires a compatible installed partition layout. Local image
-inspection and partition-fit checks do not verify the device's installed layout.
+These are build/packaging and host control-flow checks, not evidence of the
+installed device's partition layout, RF operation, or physical recovery.
 
 ## OTA sanity and validation limits
 
