@@ -291,6 +291,8 @@ extern const BoardConfig BOARD;
 #  include "boards/heltec_v4.h"
 #elif defined(BOARD_HELTEC_V42)
 #  include "boards/heltec_v42.h"
+#elif defined(BOARD_HELTEC_V42_USB_ETH)
+#  include "boards/heltec_v42_usb_eth.h"
 #elif defined(BOARD_HELTEC_V43)
 #  include "boards/heltec_v43.h"
 #elif defined(BOARD_IKOKA_STICK)

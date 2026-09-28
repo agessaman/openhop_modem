@@ -34,6 +34,12 @@ void loop();
 // cancelled. Cheap — safe to invoke on every frame.
 void notifyValidFrame();
 
+#if defined(OPENHOP_USB_ECM)
+// Call every loop with actual Ethernet-IP and radio state. Continuous health for
+// 120 s can satisfy OTA sanity when USB-host mode has no USB-CDC frames.
+void notifyNetworkHealth(bool healthy);
+#endif
+
 // Current mDNS hostname ("heltec-ab12cd"), suitable for building
 // "heltec-ab12cd.local" on the host. Returns empty string before begin().
 const char* getHostname();

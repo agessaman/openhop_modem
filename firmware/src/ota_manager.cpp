@@ -4,6 +4,9 @@
 // =============================================================
 #include "ota_manager.h"
 #include "board_config.h"
+#if defined(OPENHOP_USB_ECM)
+#include "ota_sanity_policy.h"
+#endif
 #include "ethernet_manager.h"
 #include "gps_manager.h"
 #include "net_filter.h"
@@ -20,6 +23,9 @@
 #include <Update.h>
 #include <WebServer.h>
 #include <ETH.h>
+#if defined(OPENHOP_USB_ECM)
+#include "usb_ecm_manager.h"
+#endif
 #include <WiFi.h>
 #include <esp_ota_ops.h>
 
@@ -42,6 +48,9 @@ static bool        started          = false;
 static bool        markedValid      = false;
 static uint32_t    sanityDeadline   = 0;
 static bool        sawValidFrame    = false;
+#if defined(OPENHOP_USB_ECM)
+static OtaSanityPolicy networkHealth;
+#endif
 
 static String modemTitle() {
     return String(BOARD.name) + " openHop Modem";
@@ -132,13 +141,22 @@ struct NetworkSnapshot {
 static NetworkSnapshot getNetworkSnapshot() {
     NetworkSnapshot snap;
     if (EthernetManager::hasIP()) {
-        snap.iface = "Ethernet";
+        snap.iface = "USB ECM";
         snap.live = true;
+#if defined(OPENHOP_USB_ECM)
+        snap.ip = UsbEcmManager::localIP();
+        snap.subnet = UsbEcmManager::subnetMask();
+        snap.gateway = UsbEcmManager::gatewayIP();
+        snap.dns1 = UsbEcmManager::dnsIP(0);
+        snap.dns2 = UsbEcmManager::dnsIP(1);
+#else
+        snap.iface = "Ethernet";
         snap.ip = ETH.localIP();
         snap.subnet = ETH.subnetMask();
         snap.gateway = ETH.gatewayIP();
         snap.dns1 = ETH.dnsIP(0);
         snap.dns2 = ETH.dnsIP(1);
+#endif
         return snap;
     }
     if (WifiManager::isSTAConnected()) {
@@ -209,7 +227,11 @@ static WebUiShared::Model buildWebUiModel() {
     model.uptimeSec = snap.status.uptime_sec;
     model.dieTemperatureC = snap.status.temp_c;
     model.capabilities.wifi = BOARD.has_wifi;
+#if defined(OPENHOP_USB_ECM)
+    model.capabilities.ethernet = true;
+#else
     model.capabilities.ethernet = BOARD.ethernet.enabled;
+#endif
     model.capabilities.mdns = true;
     model.capabilities.wifiReset = BOARD.has_wifi;
     model.capabilities.wifiAntennaSelection = WifiManager::hasWifiAntennaSwitch();
@@ -927,23 +949,30 @@ static bool applyConfigPatch(JsonVariantConst root,
 // the previous slot unless we call esp_ota_mark_app_valid_cancel_rollback()
 // first. We only call it once we've proven:
 //   1. the radio came up (checked in main.cpp before OTAManager::begin)
-//   2. a valid host frame was parsed — proves USB-CDC + frame parser work
+//   2. a valid host frame was parsed, OR (USB-ECM experiment only)
+//      radio + Ethernet stayed healthy continuously for 120 seconds
 //   3. we've been running for SANITY_TIMEOUT_MS without crashing
 static void attemptMarkValid() {
     if (markedValid) return;
+#if defined(OPENHOP_USB_ECM)
+    // USB-host mode has no USB-CDC host frames. Keep rollback protection,
+    // but accept a continuously healthy radio + Ethernet for two minutes.
+    if (!sawValidFrame && !networkHealth.healthyFor(millis(), SANITY_TIMEOUT_MS)) return;
+#else
     if (!sawValidFrame) return;
+#endif
     if ((int32_t)(millis() - sanityDeadline) < 0) return;
 
     const esp_partition_t* running = esp_ota_get_running_partition();
     esp_ota_img_states_t state;
     if (esp_ota_get_state_partition(running, &state) != ESP_OK) {
-        markedValid = true;   // nothing we can do; stop retrying
-        return;
+        return;  // keep retrying; a reboot may otherwise revert this slot
     }
     if (state == ESP_OTA_IMG_PENDING_VERIFY) {
         esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
         Serial.printf("[OTA] marked running app valid: %s\n",
                       err == ESP_OK ? "OK" : "FAIL");
+        if (err != ESP_OK) return;
     } else {
         Serial.printf("[OTA] running app state=%d (no rollback needed)\n", (int)state);
     }
@@ -1477,7 +1506,7 @@ static void handleNetworkSave() {
     } else {
         cfg.wifiExternalAntenna = false;
     }
-    cfg.wifiPowerSave = httpServer->hasArg("wifi_ps");
+    if (BOARD.has_wifi) cfg.wifiPowerSave = httpServer->hasArg("wifi_ps");
 
     if (cfg.useStaticIP) {
         if ((uint32_t)cfg.staticIP == 0 || (uint32_t)cfg.subnet == 0 || (uint32_t)cfg.gateway == 0) {
@@ -1672,9 +1701,16 @@ static void handleUpdateResult() {
     bool ok = !Update.hasError();
     String body;
     if (ok) {
+#if defined(OPENHOP_USB_ECM)
+        // This app-only OTA cannot turn on rollback in the installed bootloader.
+        // Do not promise a recovery mechanism the existing V4.2 may not have.
+        body = F("OK — rebooting into experimental USB ECM firmware. "
+                 "Automatic rollback is not available; keep physical USB recovery ready.");
+#else
         body = F("OK — rebooting into new firmware. "
                  "If the new image fails its sanity check within 2 minutes, "
                  "the bootloader will roll back automatically.");
+#endif
     } else {
         body = String(F("FAIL — ")) + Update.errorString();
     }
@@ -1770,7 +1806,9 @@ void begin(const String& hn, const String& tk) {
     }
     httpServer->on("/token",  HTTP_POST, handleTokenSave);
     httpServer->on("/auth",   HTTP_POST, handleAuthSave);
-    httpServer->on("/wifi-reset", HTTP_POST, handleWifiReset);
+    if (BOARD.has_wifi) {
+        httpServer->on("/wifi-reset", HTTP_POST, handleWifiReset);
+    }
     httpServer->on("/reboot", HTTP_POST, handleReboot);
     httpServer->on("/update", HTTP_POST, handleUpdateResult, handleUpdateUpload);
     httpServer->onNotFound([]() { httpServer->send(404, "text/plain", "Not found"); });
@@ -1779,6 +1817,9 @@ void begin(const String& hn, const String& tk) {
     sanityDeadline = millis() + SANITY_TIMEOUT_MS;
     sawValidFrame  = false;
     markedValid    = false;
+#if defined(OPENHOP_USB_ECM)
+    networkHealth.reset();
+#endif
     started        = true;
 
     Serial.printf("[OTA] HTTP /update + ArduinoOTA ready on %s (http auth: %s, arduino ota: %s)\n",
@@ -1797,6 +1838,12 @@ void loop() {
 void notifyValidFrame() {
     sawValidFrame = true;
 }
+
+#if defined(OPENHOP_USB_ECM)
+void notifyNetworkHealth(bool healthy) {
+    if (started && !markedValid) networkHealth.observe(millis(), healthy);
+}
+#endif
 
 const char* getHostname() {
     return hostname.c_str();

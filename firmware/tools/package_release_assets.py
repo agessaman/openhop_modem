@@ -8,6 +8,7 @@ import re
 import zipfile
 from pathlib import Path
 
+from firmware_envs import discover_release_envs
 from package_nrf52_ota import (
     PackageError,
     firmware_version_from_source,
@@ -29,15 +30,7 @@ def sha256_file(path: Path) -> str:
 
 
 def discover_platformio_envs() -> list[str]:
-    platformio_ini = FIRMWARE / "platformio.ini"
-    envs: list[str] = []
-    for line in platformio_ini.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[env:") and stripped.endswith("]"):
-            envs.append(stripped[len("[env:"):-1])
-    if not envs:
-        raise SystemExit(f"No [env:<name>] blocks found in {platformio_ini}")
-    return envs
+    return discover_release_envs(FIRMWARE / "platformio.ini")
 
 
 def discover_asset_dirs() -> list[Path]:

@@ -30,6 +30,16 @@ your board:
 | Seeed XIAO nRF52840 + Wio-SX1262 | `xiao_nrf52_wio` | n/a | none — USB-CDC only |
 | RAKwireless RAK3401 (RAK13302 1 W front end) | `rak3401` | n/a | none — USB-CDC only |
 
+The separate **experimental** V4.2 USB-host Ethernet env is
+`heltec_v42_usb_eth`, currently limited to the Ubiquiti
+UACC-Adapter-PoE-USBC. It is not in the browser flasher or the ordinary
+prebuilt asset set. Use [its experimental build/OTA procedure](firmware/USB_ECM_EXPERIMENT.md)
+and [the USB device contribution contract](firmware/USB_ECM_CONTRIBUTING.md)
+instead of the generic commands below. This experiment disables Wi-Fi STA/AP,
+including saved credentials: there is no wireless rescue. Keep a known-good
+`heltec_v42` image and a verified physical ROM-bootloader/serial recovery method;
+native application USB is occupied by host mode.
+
 The `esp32_p4_nano`, `ethermesh_1w`, `station_g2`, `station_g3`, and `photon_1w_xiao_esp32c6` envs use the
 [pioarduino fork](https://github.com/pioarduino/platform-espressif32)
 (pinned in `platformio.ini`) for the Arduino-ESP32 3.x / ESP-IDF 5.x

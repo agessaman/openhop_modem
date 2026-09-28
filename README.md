@@ -32,6 +32,19 @@ openHop application and its access to USB or the modem's network.
 | **RAK3401**                                                                                                 | nRF52840 (RAK4631 core) + RAK13302   | SX1262 + SKY66122 ~1 W FEM | **none** — USB-CDC only |
 | **Seeed XIAO nRF52840 + Wio-SX1262**                                                                        | XIAO nRF52840                | bare SX1262                | **none** — USB-CDC only |
 
+**Experimental USB Ethernet:** `heltec_v42_usb_eth` is a separate V4.2-only
+USB-host CDC-ECM build currently admitting only the Ubiquiti
+UACC-Adapter-PoE-USBC (`0bda:8153`, ECM configuration 2). It is Ethernet-only:
+Wi-Fi STA/AP are disabled regardless of saved credentials. Authenticated HTTP/OTA
+and the existing modem TCP service start on Ethernet; physical recovery is required
+if Ethernet fails.
+It is **not** a generic USB dongle image or a published flasher target; the
+mixed-framework build and OTA procedure are in
+[USB_ECM_EXPERIMENT.md](firmware/USB_ECM_EXPERIMENT.md). For device/board PR
+requirements and the initial compatibility registry, see
+[USB_ECM_CONTRIBUTING.md](firmware/USB_ECM_CONTRIBUTING.md) and
+[issue #75](https://github.com/openhop-dev/openhop_modem/issues/75).
+
 openHop Core connects to the modem through `USBLoRaRadio` or
 `TCPLoRaRadio`. Routing, encryption, retransmission, and other MeshCore
 logic stay on the host; the modem handles the SX1262 physical layer:
@@ -72,7 +85,8 @@ Wio use USB-CDC only.
 
 ## Project layout
 
-- **`firmware/`** — PlatformIO tree, twenty environments sharing one source.
+- **`firmware/`** — PlatformIO tree, supported targets plus a separate
+  experimental V4.2 USB-ECM environment sharing one source.
   Each board lives in `include/boards/<env>.h`; `platformio.ini` picks
   one via `-DBOARD_<NAME>`. Prebuilt artifacts (ESP32: combined
   `firmware.factory.bin` plus `bootloader.bin / partitions.bin / firmware.bin`;

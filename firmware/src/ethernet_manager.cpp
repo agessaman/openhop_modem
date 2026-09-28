@@ -8,6 +8,23 @@
 
 #include "sdkconfig.h"
 
+#if defined(OPENHOP_USB_ECM)
+#include "usb_ecm_manager.h"
+namespace EthernetManager {
+void begin(const char* hostname, bool useStaticIP, const IPAddress& ip,
+           const IPAddress& gateway, const IPAddress& subnet,
+           const IPAddress& dns1, const IPAddress& dns2) {
+    UsbEcmManager::begin(hostname, useStaticIP, ip, gateway, subnet, dns1, dns2);
+}
+void end() {} // Keep USB host alive for hot-plug; this target has no Wi-Fi rescue.
+void loop() { UsbEcmManager::loop(); }
+bool isLinkUp() { return UsbEcmManager::isLinkUp(); }
+bool hasIP() { return UsbEcmManager::hasIP(); }
+const char* getIPString() { return UsbEcmManager::getIPString(); }
+const char* getMACString() { return UsbEcmManager::getMACString(); }
+}
+#else
+
 // Internal EMAC + RMII PHY support is only present on a subset of
 // targets (ESP32 original and ESP32-P4 in this project). On chips
 // without it (ESP32-S3 etc.) the ETH headers don't define the
@@ -229,3 +246,4 @@ const char* getMACString() { return ""; }
 } // namespace EthernetManager
 
 #endif // CONFIG_ETH_USE_ESP32_EMAC
+#endif // !OPENHOP_USB_ECM

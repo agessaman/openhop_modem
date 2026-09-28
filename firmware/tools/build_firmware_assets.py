@@ -28,6 +28,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+from firmware_envs import discover_release_envs
 from nrf52_flash_layout import validate_rak4631_board, validate_rak4631_size
 from nrf52_uf2 import uf2_conversion_command
 from package_nrf52_ota import (
@@ -199,14 +200,7 @@ def run(cmd: list[str], cwd: Path = ROOT) -> str:
 
 
 def discover_envs() -> list[str]:
-    envs: list[str] = []
-    for line in PLATFORMIO_INI.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[env:") and stripped.endswith("]"):
-            envs.append(stripped[len("[env:"):-1])
-    if not envs:
-        raise SystemExit(f"No [env:<name>] blocks found in {PLATFORMIO_INI}")
-    return envs
+    return discover_release_envs(PLATFORMIO_INI)
 
 
 def git_changed_files(base: str | None, head: str | None) -> list[str]:

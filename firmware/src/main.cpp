@@ -47,6 +47,9 @@
 #  include "tcp_server.h"
 #  include "ota_manager.h"
 #  include "ethernet_manager.h"
+#  if defined(OPENHOP_USB_ECM)
+#    include "usb_ecm_manager.h"
+#  endif
 #  include "runtime_stats.h"
 #  include "gps_manager.h"
 #  include "pmu_manager.h"
@@ -1340,7 +1343,7 @@ void processHostCommand(uint8_t cmd, const uint8_t* payload, uint16_t len,
     }
 
     case CMD_SET_WIFI: {
-#ifndef ARDUINO_ARCH_ESP32
+#if !defined(ARDUINO_ARCH_ESP32) || defined(OPENHOP_USB_ECM)
         sendError(ERR_INVALID_CMD, src);   // no Wi-Fi stack on this build
         break;
 #else
@@ -1500,10 +1503,14 @@ void processHostCommand(uint8_t cmd, const uint8_t* payload, uint16_t len,
     }
 
     case CMD_WIFI_RESET: {
+#if defined(OPENHOP_USB_ECM)
+        sendError(ERR_INVALID_CMD, src); // no provisioning AP; preserve management NVS
+#else
         sendFrame(CMD_WIFI_RESET, nullptr, 0, src);
         if (src == TransportSource::USB) Serial.flush();
         delay(200);
         WifiManager::factoryReset();   // does not return
+#endif
         break;
     }
 
@@ -1541,7 +1548,16 @@ void setup() {
 #endif
     // PRG held ≥5s at boot → wipe Wi-Fi NVS and reboot. Must come before
     // other init so button sampling is clean.
+#if !defined(OPENHOP_USB_ECM)
     WifiManager::checkResetButton();
+#else
+    // Keep the OLED page button electrically initialized even though this
+    // Ethernet-only build must not offer the Wi-Fi/NVS reset operation.
+    if (BOARD.pin_user_button >= 0) {
+        pinMode(BOARD.pin_user_button,
+                BOARD.user_button_active_low ? INPUT_PULLUP : INPUT_PULLDOWN);
+    }
+#endif
 
     // Drive the E22 EN pin LOW immediately so the LDOs and PA bias
     // see a clean, deliberate power-up — no-op on boards with
@@ -1787,14 +1803,19 @@ void setup() {
         // saved config was loaded above for hostname/TCP setup.
     }
     deviceHostname = WifiManager::getHostname();
+#if defined(OPENHOP_USB_ECM)
+    // Ethernet-only experiment: no STA, setup AP, or Wi-Fi rescue. Keep the
+    // host alive for late adapter/link arrival. ECM uses DHCP; saved Wi-Fi
+    // settings remain in NVS but never activate the Wi-Fi radio.
+    EthernetManager::begin(deviceHostname.c_str());
+#endif
 
     bool netUp = WifiManager::isSTAConnected() || EthernetManager::hasIP();
     if (netUp) {
         const auto& wcfg = WifiManager::getConfig();
-        // Diagnostic mode (has_wifi == false): ignore the saved token
-        // so we can probe the TCP server without re-authenticating.
-        // Restore normal auth once Wi-Fi comes back.
-#if defined(OPENHOP_ETHERNET_W5100S)
+        // Ethernet-only production transports retain the saved token.
+        // Keep legacy Wi-Fi-disabled diagnostic behavior on other targets.
+#if defined(OPENHOP_ETHERNET_W5100S) || defined(OPENHOP_USB_ECM)
         String token = wcfg.tcpToken;
 #else
         String token = BOARD.has_wifi ? wcfg.tcpToken : String();
@@ -1951,10 +1972,17 @@ void loop() {
 #ifdef ARDUINO_ARCH_ESP32
     const uint32_t invalidSTA = WifiManager::consumeSTAInvalidation();
     if (invalidSTA) TCPServer::invalidateInterface(IPAddress(invalidSTA));
+#if defined(OPENHOP_USB_ECM)
+    const uint32_t invalidECM = UsbEcmManager::consumeInvalidation();
+    if (invalidECM) TCPServer::invalidateInterface(IPAddress(invalidECM));
+#endif
 #endif
     if (tcpStarted) TCPServer::loop();
 #if defined(OPENHOP_ETHERNET_W5100S)
     W5100sHttpServer::loop();
+#endif
+#if defined(OPENHOP_USB_ECM)
+    if (otaStarted) OTAManager::notifyNetworkHealth(radioReady && EthernetManager::hasIP());
 #endif
     if (otaStarted) OTAManager::loop();
 #if defined(ARDUINO_ARCH_ESP32) || \
@@ -1974,7 +2002,7 @@ void loop() {
     bool netUp = WifiManager::isSTAConnected() || EthernetManager::hasIP();
     if (!tcpStarted && netUp) {
         const auto& wcfg = WifiManager::getConfig();
-#if defined(OPENHOP_ETHERNET_W5100S)
+#if defined(OPENHOP_ETHERNET_W5100S) || defined(OPENHOP_USB_ECM)
         String token = wcfg.tcpToken;
 #else
         String token = BOARD.has_wifi ? wcfg.tcpToken : String();
@@ -1985,7 +2013,7 @@ void loop() {
     }
     if (!otaStarted && netUp) {
         const auto& wcfg = WifiManager::getConfig();
-#if defined(OPENHOP_ETHERNET_W5100S)
+#if defined(OPENHOP_ETHERNET_W5100S) || defined(OPENHOP_USB_ECM)
         String token = wcfg.tcpToken;
 #else
         String token = BOARD.has_wifi ? wcfg.tcpToken : String();

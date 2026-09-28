@@ -23,6 +23,10 @@ __pycache__/
 *.egg-info/
 .venv-pio/
 firmware/.selected_firmware_envs
+# Mixed Arduino/IDF local generated configuration and downloaded components
+firmware/sdkconfig.*
+!firmware/sdkconfig.defaults
+firmware/managed_components/
 
 # macOS
 .DS_Store
