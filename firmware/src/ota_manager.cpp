@@ -215,6 +215,9 @@ static WebUiShared::Model buildWebUiModel() {
     model.capabilities.wifiReset = BOARD.has_wifi;
     model.capabilities.wifiAntennaSelection = WifiManager::hasWifiAntennaSwitch();
     model.capabilities.heltecV43Controls = RFFrontEnd::hasHeltecV43LnaControl();
+#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
+    model.capabilities.stationAgcControls = RFFrontEnd::hasAgcResetIntervalControl();
+#endif
     model.capabilities.gps = GPSManager::hasGpsPins();
     model.capabilities.battery = BOARD.battery.pin >= 0 || BOARD.battery.fuel_gauge_i2c_addr != 0;
     model.capabilities.radio = true;
@@ -1120,20 +1123,6 @@ static void handleRoot() {
                   "<button type='submit'>Save RF front-end settings</button>"
                   "</form><p class='m'>Settings apply immediately and persist across reboots. Unchecked LNA = GPIO5/CTX HIGH, external LNA bypassed.</p></div></details>");
     }
-
-#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
-    body += F("<details open><summary>Station AGC Recovery</summary><div class='inside'>"
-              "<p>Optional workaround for receiver deafness. Each reset briefly interrupts reception; "
-              "disabled by default. The recommended interval for affected stations is 4 seconds.</p>"
-              "<form method='POST' action='/agc-reset'>"
-              "<label>AGC reset interval (seconds; 0 disables)"
-              "<input name='agc_reset_interval_sec' type='number' min='0' max='3600' step='1' required value='");
-    body += String(RFFrontEnd::getAgcResetIntervalSec());
-    body += F("'></label><button type='submit'>Save AGC interval</button>"
-              "</form><p class='m'>Applies immediately and persists across reboots. "
-              "Resets are deferred during active reception and for 10 seconds after TX.</p>"
-              "</div></details>");
-#endif
 
     if (RFFrontEnd::hasPaModeControl() && RFFrontEnd::hasStationG3LnaControl()) {
         body += F("<details open><summary>Station G3 RF Front-End</summary><div class='inside'>"
