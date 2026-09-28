@@ -280,6 +280,10 @@ struct BoardConfig {
     // established during boot and held; the LNA is enabled for RX and bypassed
     // before TX.
     RfFrontEndControlConfig rf_frontend;
+
+    // Periodic SX126x AGC maintenance. Zero disables it. Keep this at the
+    // end so existing positional board initializers retain their layout.
+    uint32_t sx126x_agc_reset_interval_ms = 0;
 };
 
 extern const BoardConfig BOARD;
