@@ -129,7 +129,19 @@ Per-board highlights (full pin numbers in the headers, mDNS prefix is
 - **LilyGO T-Beam-S3 Supreme** — bare SX1262 + onboard L76K GNSS + 1.3" SH1106 OLED, native USB-CDC. LoRa/GNSS/OLED power rails are gated by an onboard AXP2101 PMU chip (`pmu_manager.cpp` / `BoardConfig.pmu`) on its own I2C bus rather than plain GPIOs — the only board in this fleet wired that way.
 - **RAK3112 WisMesh** — SX1262 inside the RAK3112 module, no OLED.
 - **Station G2** — SX1262 + high-power PA/LNA, SH1106 display, max SX1262 drive capped at 19 dBm.
-- **Station G3** — BQESP32V1M N16R8 (16 MB flash + 8 MB octal PSRAM) + BQ35LORA900V1M, Station G2-compatible radio/display pins, persistent Station G3-only web/API selection of lower or higher PA PL1 mode on GPIO9 (lower by default), persistent RX-only external LNA enable/bypass on GPIO10, onboard INA219 input-voltage/current/power telemetry with since-boot minimum voltage and maximum current, optional GROVE GPS on IO7/IO15, and max SX1262 drive capped at 19 dBm. The LNA is always bypassed before TX. Remove the PA PL1/LNA P jumpers for software GPIO control; PA PL2 remains a physical jumper.
+- **Station G3** — BQESP32V1M N16R8 (16 MB flash + 8 MB octal PSRAM) + BQ35LORA900V1M, Station G2-compatible radio/display pins, persistent Station G3-only web/API selection of lower or higher PA PL1 mode on GPIO9 (lower by default), persistent RX-only external LNA enable/bypass on GPIO10, onboard INA219 input-voltage/current/power telemetry with since-boot minimum voltage and maximum current, optional GROVE GPS on IO7/IO15, and max SX1262 drive capped at 19 dBm. The LNA is always bypassed before TX and during periodic AGC maintenance. Remove the PA PL1/LNA P jumpers for software GPIO control; PA PL2 remains a physical jumper.
+
+Station G2 and G3 can experience a reported SX1262 receiver failure mode in
+which the apparent noise floor rises by roughly 20–30 dB and packet reception
+stops until the radio is reinitialized. The optional workaround calls
+RadioLib's `resetAGC()` during idle RX, then resumes continuous receive. Resets
+are deferred during TX, standby, detected packet reception, and for 10 seconds
+after a Station transmits so maintenance cannot interrupt the usual repeater
+forwarding/response window. Each reset still creates a brief listening gap, so
+periodic maintenance is disabled by default. Set `agc_reset_interval_sec` to
+`4` in `/api/config` or use the Station AGC Recovery control in the modem
+WebUI to enable the recommended four-second interval; changes apply
+immediately without rebooting the modem, and `0` disables the workaround.
 - **WaveShare ESP32-P4-Nano** — RISC-V P4 + C6 + IP101GRI Ethernet PHY + off-board E22, runtime ETH-or-Wi-Fi (never both, see below).
 - **Heltec T114** — nRF52840 + bare SX1262 + ST7789 TFT 135×240, **no Wi-Fi/TCP/network OTA**; USB-CDC + UART transport only, OTA via Adafruit nRF52 DFU (USB) or in-app `CMD_OTA_*` over the protocol transport.
 - **RAK4631 USB** — RAK4631 nRF52840 core on a compatible WisBlock base, using the same proven internal SX1262 pins, DIO2 RF-switch policy, SPIM2 radio bus, and 22 dBm ceiling as the Ethernet build. The `rak4631_usb` environment omits the RAK13800 dependency and all W5100S/TCP/network initialization; native USB-CDC is the only modem transport.

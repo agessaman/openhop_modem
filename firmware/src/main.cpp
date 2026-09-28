@@ -20,6 +20,7 @@
 #include "frame_parser.h"
 #include "compat.h"
 #include "rf_frontend.h"
+#include "agc_maintenance.h"
 #include "station_g3_power.h"
 #include "runtime_stats.h"
 #include "battery_monitor.h"
@@ -366,7 +367,15 @@ static float    noiseFloorSum    = 0.0f;
 static int      noiseFloorCount  = 0;
 static uint32_t lastPacketTime   = 0;
 static uint32_t lastNoiseSample  = 0;
-static uint32_t lastAgcResetMs   = 0;
+static AgcMaintenance::Schedule agcMaintenanceSchedule;
+#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
+// openHop repeaters can defer forwarding by several packet airtimes. Keep
+// periodic maintenance out of that response window after this modem transmits.
+static uint32_t lastTxCompleteMs = 0;
+static uint32_t agcResetCount = 0;
+static uint32_t lastSuccessfulAgcResetMs = 0;
+static uint32_t lastAgcSuccessLogMs = 0;
+#endif
 
 // ─── CAD parameters (set by host via CMD_SET_CAD_PARAMS) ─────
 // When cadCustom == false we call scanChannel() with RadioLib's defaults;
@@ -518,6 +527,11 @@ Snapshot capture() {
     snap.stationG3PowerW = power.powerW;
     snap.stationG3MinimumInputVoltageV = power.minimumInputVoltageV;
     snap.stationG3MaximumCurrentMa = power.maximumCurrentMa;
+#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
+    snap.agcResetCount = agcResetCount;
+    snap.lastAgcResetMsAgo = agcResetCount > 0
+        ? (uint32_t)(millis() - lastSuccessfulAgcResetMs) : 0;
+#endif
     return snap;
 }
 }
@@ -1149,6 +1163,9 @@ void processHostCommand(uint8_t cmd, const uint8_t* payload, uint16_t len,
         dio1Flag = false;
         isTxActive = false;
         lastPacketTime = millis();
+#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
+        lastTxCompleteMs = lastPacketTime;
+#endif
 
         if (txOk) {
             status.tx_count++;
@@ -1729,6 +1746,7 @@ void setup() {
         }
 
         radioReady = true;
+        agcMaintenanceSchedule.recordAttempt(millis());
         startRak3401ReadyLedHeartbeat();
         }
     } else {
@@ -1883,20 +1901,60 @@ void sampleNoiseFloor() {
 }
 
 void maybeResetAgc() {
-    if (!radioReady || radioStandby || isTxActive) return;
-    if (!RFFrontEnd::hasHeltecV43LnaControl()) return;
-    uint16_t intervalSec = RFFrontEnd::getAgcResetIntervalSec();
-    if (intervalSec == 0) return;
+    if (!RFFrontEnd::hasAgcResetIntervalControl()) return;
 
-    uint32_t now = millis();
-    uint32_t intervalMs = (uint32_t)intervalSec * 1000U;
-    if (lastAgcResetMs == 0) {
-        lastAgcResetMs = now;
-        return;
+    AgcMaintenance::Conditions conditions;
+    conditions.radioReady = radioReady;
+    conditions.intentionalStandby = radioStandby;
+    conditions.txActive = isTxActive;
+    conditions.dio1Pending = dio1Flag;
+    conditions.intervalSec = RFFrontEnd::getAgcResetIntervalSec();
+    conditions.nowMs = millis();
+    conditions.lastPacketMs = lastPacketTime;
+
+#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
+    conditions.lastTxCompleteMs = lastTxCompleteMs;
+    conditions.postTxQuietMs = AgcMaintenance::STATION_POST_TX_QUIET_MS;
+    if (!AgcMaintenance::shouldAttempt(
+            agcMaintenanceSchedule, conditions,
+            []() { return isReceivingPacket() || dio1Flag; })) return;
+
+    // SetSleep is valid only from SX126x standby. Bypass the external LNA,
+    // enter radio standby explicitly, then let RadioLib perform its warm-sleep
+    // AGC calibration. Always use OpenHop's RX path afterward so failures also
+    // get a best-effort recovery and the configured front end is restored.
+    const auto result = AgcMaintenance::run(
+        RADIOLIB_ERR_NONE,
+        []() { RFFrontEnd::prepareStandby(); },
+        []() { return radio.standby(); },
+        []() { return radio.resetAGC(); },
+        []() { return startReceive(); });
+    const uint32_t attemptedAt = millis();
+    agcMaintenanceSchedule.recordAttempt(attemptedAt);
+    if (result.standbyState != RADIOLIB_ERR_NONE) {
+        Serial.printf("[AGC] standby failed: %d\n", result.standbyState);
     }
-    if ((uint32_t)(now - lastAgcResetMs) < intervalMs) return;
-    if ((uint32_t)(now - lastPacketTime) < 500) return;
-    if (dio1Flag) return;
+    if (result.resetAttempted && result.resetState != RADIOLIB_ERR_NONE) {
+        Serial.printf("[AGC] reset failed: %d\n", result.resetState);
+    }
+    if (!result.rxRestarted) {
+        Serial.println("[AGC] RX restart failed");
+    }
+    if (!result.succeeded(RADIOLIB_ERR_NONE)) return;
+
+    lastSuccessfulAgcResetMs = attemptedAt;
+    ++agcResetCount;
+    noiseFloorSum = 0.0f;
+    noiseFloorCount = 0;
+    if (agcResetCount == 1 ||
+        (uint32_t)(attemptedAt - lastAgcSuccessLogMs) >= 60000U) {
+        Serial.printf("[AGC] SX1262 AGC reset; RX restarted (count=%lu)\n",
+                      (unsigned long)agcResetCount);
+        lastAgcSuccessLogMs = attemptedAt;
+    }
+#else
+    if (!AgcMaintenance::shouldAttempt(
+            agcMaintenanceSchedule, conditions, []() { return false; })) return;
 
     // Heltec V4.3 can clamp its apparent noise floor after strong
     // out-of-band interference. A brief RX restart mirrors the
@@ -1905,10 +1963,12 @@ void maybeResetAgc() {
     radio.standby();
     delay(2);
     startReceive();
-    lastAgcResetMs = now;
+    agcMaintenanceSchedule.recordAttempt(millis());
     noiseFloorSum = 0.0f;
     noiseFloorCount = 0;
-    LOG_R_INFO("agc.reset.interval fired after %u s", (unsigned)intervalSec);
+    LOG_R_INFO("agc.reset.interval fired after %u s",
+               (unsigned)conditions.intervalSec);
+#endif
 }
 
 // ─── Main loop ───────────────────────────────────────────────

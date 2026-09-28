@@ -13,6 +13,7 @@ struct Capabilities {
     bool wifiReset = false;
     bool wifiAntennaSelection = false;
     bool heltecV43Controls = false;
+    bool stationAgcControls = false;
     bool gps = false;
     bool battery = false;
     bool radio = false;
