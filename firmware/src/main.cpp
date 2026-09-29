@@ -360,6 +360,7 @@ static volatile bool dio1Flag    = false;
 static volatile uint32_t dio1IrqCount = 0;
 static bool        radioReady    = false;
 static bool        isTxActive    = false;
+static bool        rxBoostedGainEnabled = false;
 
 // ─── Noise floor sampling ────────────────────────────────────
 #define NUM_NOISE_FLOOR_SAMPLES 20
@@ -668,6 +669,15 @@ static void rfSwitchConfigureRadio() {
     }
 }
 
+static bool applyRxBoostedGainMode(bool enabled) {
+    int state = radio.setRxBoostedGainMode(enabled);
+    Serial.printf("[INFO] setRxBoostedGainMode(%s) -> %d\n",
+                  enabled ? "true" : "false", state);
+    if (state != RADIOLIB_ERR_NONE) return false;
+    rxBoostedGainEnabled = enabled;
+    return true;
+}
+
 static void configureBoardRadioOptions() {
     if (BOARD.sx126x_current_limit_ma > 0) {
         int state = radio.setCurrentLimit(BOARD.sx126x_current_limit_ma);
@@ -675,9 +685,9 @@ static void configureBoardRadioOptions() {
                       (int)BOARD.sx126x_current_limit_ma, state);
     }
 
+    rxBoostedGainEnabled = false;
     if (BOARD.sx126x_rx_boosted_gain) {
-        int state = radio.setRxBoostedGainMode(true);
-        Serial.printf("[INFO] setRxBoostedGainMode(true) -> %d\n", state);
+        applyRxBoostedGainMode(true);
     }
 
     if (BOARD.sx126x_register_patch) {
@@ -1010,6 +1020,9 @@ void processHostCommand(uint8_t cmd, const uint8_t* payload, uint16_t len,
     if (!BOARD.has_lora_radio || !radioReady) {
         switch (cmd) {
         case CMD_TX_REQUEST:  case CMD_SET_CONFIG:  case CMD_GET_CONFIG:
+        case CMD_GET_RF_CAPS: case CMD_SET_AGC_INTERVAL: case CMD_GET_AGC_INTERVAL:
+        case CMD_SET_FEM_STATE: case CMD_GET_FEM_STATE:
+        case CMD_SET_RX_BOOST: case CMD_GET_RX_BOOST:
         case CMD_STATUS_REQ:  case CMD_NOISE_REQ:   case CMD_CAD_REQUEST:
         case CMD_RX_START:    case CMD_SET_CAD_PARAMS:
             sendError(ERR_NO_RADIO, src);
@@ -1332,6 +1345,106 @@ void processHostCommand(uint8_t cmd, const uint8_t* payload, uint16_t len,
 
     case CMD_GET_CONFIG: {
         sendFrame(CMD_CONFIG_RESP, (uint8_t*)&currentConfig, sizeof(RadioConfig), src);
+        break;
+    }
+
+    case CMD_GET_RF_CAPS: {
+        uint32_t bits = RF_CAP_AGC | RF_CAP_RX_BOOSTED_GAIN;
+        const RFFrontEnd::FemState fem = RFFrontEnd::getFemState();
+        if ((fem.capability & FEM_STATE_RX_LNA) != 0) bits |= RF_CAP_FEM_RX_LNA;
+        if ((fem.capability & FEM_STATE_TX_PA) != 0) bits |= RF_CAP_FEM_TX_PA;
+        uint8_t buf[4];
+        memcpy(buf, &bits, sizeof(buf));
+        sendFrame(CMD_RF_CAPS_RESP, buf, sizeof(buf), src);
+        break;
+    }
+
+    case CMD_GET_AGC_INTERVAL: {
+        uint16_t sec = RFFrontEnd::getAgcResetIntervalSec();
+        uint8_t buf[2];
+        memcpy(buf, &sec, sizeof(buf));
+        sendFrame(CMD_AGC_INTERVAL_RESP, buf, sizeof(buf), src);
+        break;
+    }
+
+    case CMD_SET_AGC_INTERVAL: {
+        if (len != sizeof(uint16_t)) {
+            sendError(ERR_INVALID_CONFIG, src);
+            break;
+        }
+        if (isTxActive) {
+            sendError(ERR_RADIO_BUSY, src);
+            break;
+        }
+        uint16_t sec = 0;
+        memcpy(&sec, payload, sizeof(sec));
+        if (sec > RFFrontEnd::MAX_AGC_RESET_INTERVAL_SEC) {
+            sendError(ERR_INVALID_CONFIG, src);
+            break;
+        }
+        if (!RFFrontEnd::setAgcResetIntervalSec(sec, false)) {
+            sendError(ERR_UNSUPPORTED, src);
+            break;
+        }
+        agcMaintenanceSchedule.recordAttempt(millis());
+        uint8_t buf[2];
+        sec = RFFrontEnd::getAgcResetIntervalSec();
+        memcpy(buf, &sec, sizeof(buf));
+        sendFrame(CMD_AGC_INTERVAL_RESP, buf, sizeof(buf), src);
+        break;
+    }
+
+    case CMD_GET_FEM_STATE: {
+        const RFFrontEnd::FemState fem = RFFrontEnd::getFemState();
+        uint8_t buf[2] = { fem.capability, fem.value };
+        sendFrame(CMD_FEM_STATE_RESP, buf, sizeof(buf), src);
+        break;
+    }
+
+    case CMD_SET_FEM_STATE: {
+        if (len != 2) {
+            sendError(ERR_INVALID_CONFIG, src);
+            break;
+        }
+        if (isTxActive || isReceivingPacket()) {
+            sendError(ERR_RADIO_BUSY, src);
+            break;
+        }
+        RFFrontEnd::FemState fem;
+        if (!RFFrontEnd::setFemState(payload[0], payload[1], false, fem)) {
+            sendError(ERR_UNSUPPORTED, src);
+            break;
+        }
+        uint8_t buf[2] = { fem.capability, fem.value };
+        sendFrame(CMD_FEM_STATE_RESP, buf, sizeof(buf), src);
+        break;
+    }
+
+    case CMD_GET_RX_BOOST: {
+        uint8_t state = rxBoostedGainEnabled ? 1 : 0;
+        sendFrame(CMD_RX_BOOST_RESP, &state, 1, src);
+        break;
+    }
+
+    case CMD_SET_RX_BOOST: {
+        if (len != 1 || (payload[0] != 0 && payload[0] != 1)) {
+            sendError(ERR_INVALID_CONFIG, src);
+            break;
+        }
+        if (isTxActive || isReceivingPacket()) {
+            sendError(ERR_RADIO_BUSY, src);
+            break;
+        }
+        const bool resumeRx = !radioStandby;
+        radio.standby();
+        const bool applied = applyRxBoostedGainMode(payload[0] != 0);
+        if (resumeRx) startReceive();
+        if (!applied) {
+            sendError(ERR_RADIO_INIT, src);
+            break;
+        }
+        uint8_t state = rxBoostedGainEnabled ? 1 : 0;
+        sendFrame(CMD_RX_BOOST_RESP, &state, 1, src);
         break;
     }
 
@@ -1904,8 +2017,6 @@ void sampleNoiseFloor() {
 }
 
 void maybeResetAgc() {
-    if (!RFFrontEnd::hasAgcResetIntervalControl()) return;
-
     AgcMaintenance::Conditions conditions;
     conditions.radioReady = radioReady;
     conditions.intentionalStandby = radioStandby;
@@ -1956,15 +2067,19 @@ void maybeResetAgc() {
         lastAgcSuccessLogMs = attemptedAt;
     }
 #else
+    // Preamble or header can be on the air before DIO1 latches. Standby
+    // would drop that frame, so wait and retry on a later loop.
     if (!AgcMaintenance::shouldAttempt(
-            agcMaintenanceSchedule, conditions, []() { return false; })) return;
+            agcMaintenanceSchedule, conditions,
+            []() { return isReceivingPacket(); })) return;
 
-    // Heltec V4.3 can clamp its apparent noise floor after strong
-    // out-of-band interference. A brief RX restart mirrors the
-    // agc.reset.interval behaviour used by LoRa firmwares such as
-    // MeshCore/Meshtastic without disturbing TX or packet IRQ handling.
+    // A strong out-of-band signal can clamp the SX1262 noise floor.
+    // A brief RX restart clears it without disturbing TX or packet IRQs.
+    // The boosted-gain register is written again because the restart
+    // drops the chip through standby.
     radio.standby();
     delay(2);
+    applyRxBoostedGainMode(rxBoostedGainEnabled);
     startReceive();
     agcMaintenanceSchedule.recordAttempt(millis());
     noiseFloorSum = 0.0f;
