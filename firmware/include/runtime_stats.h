@@ -3,6 +3,9 @@
 #include <Arduino.h>
 #include "protocol.h"
 #include "runtime_stats_values.h"
+#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
+#include "environment_sensor.h"
+#endif
 
 namespace RuntimeStats {
 
@@ -25,6 +28,7 @@ struct Snapshot {
 #if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
     uint32_t agcResetCount;
     uint32_t lastAgcResetMsAgo;
+    EnvironmentSensor::Snapshot environment;
 #endif
 };
 

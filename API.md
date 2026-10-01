@@ -133,6 +133,49 @@ Top-level keys:
 - `counters`
 - `network`
 - `gps`
+- `environment` — Station G2/G3 only; cached external Grove BME280 readings,
+  separate from `system.die_temperature_c` and `/api/temp`
+
+Station G2 and G3 probe the Grove I2C bus at `0x76` (the Seeed default), then
+`0x77`, and verify the BME280 chip ID. One sensor is supported; `0x76` takes
+precedence when both addresses contain working BME280s. Other sensor types are
+not detected.
+
+Example `environment` object in `/api/stats`:
+
+```json
+{
+  "sensor": "bme280",
+  "available": true,
+  "temperature_c": 22.8,
+  "humidity_pct": 54.2,
+  "pressure_hpa": 1014.7
+}
+```
+
+Temperature is in degrees Celsius, humidity in percent relative humidity, and
+pressure in hPa (absolute station pressure, not adjusted to sea level).
+Measurements are requested approximately every five seconds. HTTP requests use
+the cache and do not access the sensor. `available` means a successful complete
+sample less than 15 seconds old. Disconnection is detected on the next sensor
+transaction; until then the previous sample may still be returned.
+
+Before the first successful sample, after a failed transaction, or when the
+cache expires, the object is:
+
+```json
+{
+  "sensor": null,
+  "available": false,
+  "temperature_c": null,
+  "humidity_pct": null,
+  "pressure_hpa": null
+}
+```
+
+Missing or failed sensors do not prevent startup. Detection is retried every
+30 seconds while offline, allowing reconnection without a reboot. This field is
+omitted on other boards. Existing `/api/stats` fields and `/api/temp` are unchanged.
 
 Station G2 and G3 periodically reset the SX1262 AGC to mitigate a reported
 receiver "deafness" condition: the apparent noise floor can rise by roughly

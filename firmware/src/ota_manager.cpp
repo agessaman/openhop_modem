@@ -663,6 +663,20 @@ static String buildStatsJson(const RuntimeStats::Snapshot& snap,
     body += buildNetworkJson(cfg, net);
     body += F(",\"gps\":");
     body += GPSManager::buildJson();
+#if defined(BOARD_STATION_G2) || defined(BOARD_STATION_G3)
+    const auto& environment = snap.environment;
+    body += F(",\"environment\":{\"sensor\":");
+    body += environment.available ? jsonQuote(environment.sensor) : String("null");
+    body += F(",\"available\":");
+    body += boolJson(environment.available);
+    body += F(",\"temperature_c\":");
+    body += environment.available ? String(environment.temperatureC, 2) : String("null");
+    body += F(",\"humidity_pct\":");
+    body += environment.available ? String(environment.humidityPct, 2) : String("null");
+    body += F(",\"pressure_hpa\":");
+    body += environment.available ? String(environment.pressureHpa, 2) : String("null");
+    body += F("}");
+#endif
     body += F("}");
     return body;
 }

@@ -142,6 +142,16 @@ periodic maintenance is disabled by default. Set `agc_reset_interval_sec` to
 `4` in `/api/config` or use the Station AGC Recovery control in the modem
 WebUI to enable the recommended four-second interval; changes apply
 immediately without rebooting the modem, and `0` disables the workaround.
+
+Station G2 and G3 support an optional Seeed Grove BME280 on the **Grove I2C**
+connector (SDA GPIO5, SCL GPIO6, shared with the OLED and, on G3, the INA219).
+It provides cached temperature, relative humidity, and pressure in
+[`/api/stats` → `environment`](API.md#get-apistats). Both `0x76` (default) and
+`0x77` are supported. The separate Grove GPS/UART connector is not suitable.
+No sensor configuration is required; an absent sensor leaves the modem
+operational and reports unavailable readings. Run the Station G2/G3 host
+regressions with `python3 firmware/tools/test_environment_sensor.py` (requires
+PlatformIO, gcc, and g++; the runner fetches the pinned Bosch library if needed).
 - **WaveShare ESP32-P4-Nano** — RISC-V P4 + C6 + IP101GRI Ethernet PHY + off-board E22, runtime ETH-or-Wi-Fi (never both, see below).
 - **Heltec T114** — nRF52840 + bare SX1262 + ST7789 TFT 135×240, **no Wi-Fi/TCP/network OTA**; USB-CDC + UART transport only, OTA via Adafruit nRF52 DFU (USB) or in-app `CMD_OTA_*` over the protocol transport.
 - **RAK4631 USB** — RAK4631 nRF52840 core on a compatible WisBlock base, using the same proven internal SX1262 pins, DIO2 RF-switch policy, SPIM2 radio bus, and 22 dBm ceiling as the Ethernet build. The `rak4631_usb` environment omits the RAK13800 dependency and all W5100S/TCP/network initialization; native USB-CDC is the only modem transport.
