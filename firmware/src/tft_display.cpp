@@ -185,7 +185,6 @@ void OledDisplay::showRadioConfig(uint32_t freq_hz, uint32_t bandwidth_hz,
     drawText(2, 44, buf, COLOUR_FG, 1);
     snprintf(buf, sizeof(buf), "Preamble %u", (unsigned)preamble_len);
     drawText(2, 57, buf, COLOUR_FG, 1);
-    (void)board_temperature_c;
 }
 
 void OledDisplay::showDiagnostics(uint32_t uptime_sec,

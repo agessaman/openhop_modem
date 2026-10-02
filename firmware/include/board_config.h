@@ -91,10 +91,10 @@ struct BatterySenseConfig {
     uint32_t adc_divider_numerator = 0;
     uint32_t adc_divider_denominator = 0;
     uint8_t sample_count = 0;
-    int8_t adc_attenuation_db = -1;
     uint16_t minimum_plausible_mv = 0;
     uint16_t maximum_plausible_mv = 0;
     uint8_t minimum_valid_samples = 0;
+    int8_t adc_attenuation_db = -1;  // trailing extension preserves positional configs
 };
 
 struct WifiAntennaSwitchConfig {
@@ -172,12 +172,10 @@ struct BoardConfig {
     // Optional LiPo battery monitor. `battery.pin = -1` reports null/unknown.
     // Voltage is sampled in millivolts and exposed in status/API stats.
     BatterySenseConfig battery;
-    ThermistorConfig thermistor;
 
     // Hardware RF ceiling. Firmware clamps any requested TX power to
     // this value; lets the host config drive everything below.
     int8_t max_tx_power_dbm;
-    uint16_t pa_ramp_time_us = 0;  // 0 = keep RadioLib's default ramp
 
     // SX1262 TCXO control. Carrier boards declare the voltage required by
     // their 32 MHz TCXO (typically 1.8 V; the T-Beam 1W uses 3.0 V).
@@ -292,6 +290,10 @@ struct BoardConfig {
     // Periodic SX126x AGC maintenance. Zero disables it. Keep this at the
     // end so existing positional board initializers retain their layout.
     uint32_t sx126x_agc_reset_interval_ms = 0;
+
+    // Optional extensions must remain trailing for positional nRF52 boards.
+    ThermistorConfig thermistor;
+    uint16_t pa_ramp_time_us = 0;  // 0 = keep RadioLib's default ramp
 };
 
 extern const BoardConfig BOARD;

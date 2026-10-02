@@ -899,8 +899,10 @@ static bool parseSetWifi(const uint8_t* p, uint16_t len, WifiManager::Config& ou
 
 // ─── Radio configuration ────────────────────────────────────
 bool applyConfig(const RadioConfig& cfg) {
-    radio.standby();
-    int state;
+    // Invalidate before the first mutation: a partial apply must prohibit TX.
+    radioTxReady = false;
+    int state = radio.standby();
+    if (state != RADIOLIB_ERR_NONE) return false;
 
     state = radio.setFrequency(cfg.freq_hz / 1e6f);
     if (state != RADIOLIB_ERR_NONE) return false;
@@ -919,7 +921,6 @@ bool applyConfig(const RadioConfig& cfg) {
     int8_t pwr = cfg.power_dbm;
     if (pwr > BOARD.max_tx_power_dbm) pwr = BOARD.max_tx_power_dbm;
     int currentLimitBefore = (int)radio.getCurrentLimit();
-    radioTxReady = false;
     const uint8_t rampSetting = BOARD.pa_ramp_time_us == 1700
         ? RADIOLIB_SX126X_PA_RAMP_1700U : 0;
     state = applyOutputPowerAndRamp(radio, pwr, rampSetting);
@@ -936,13 +937,13 @@ bool applyConfig(const RadioConfig& cfg) {
     state = radio.setPreambleLength(cfg.preamble_len);
     if (state != RADIOLIB_ERR_NONE) return false;
 
-    radio.explicitHeader();
-    radio.setCRC(1);
-    radio.invertIQ(false);
+    if (radio.explicitHeader() != RADIOLIB_ERR_NONE) return false;
+    if (radio.setCRC(1) != RADIOLIB_ERR_NONE) return false;
+    if (radio.invertIQ(false) != RADIOLIB_ERR_NONE) return false;
 
     // Auto-LDRO mirrors openHop Core sx1262_wrapper.py — without this,
     // SF11/SF12 presets are modulation-incompatible with openHop Core.
-    radio.autoLDRO();
+    if (radio.autoLDRO() != RADIOLIB_ERR_NONE) return false;
     radioTxReady = true;
 
     // Push the live config to the TFT cache so the next status

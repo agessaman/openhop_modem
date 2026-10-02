@@ -2,7 +2,7 @@
 
 #include "board_config.h"
 
-#ifdef ARDUINO_ARCH_ESP32
+#if defined(ARDUINO_ARCH_ESP32) && defined(BOARD_LILYGO_TBEAM_1W)
 #include <Arduino.h>
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_adc/adc_oneshot.h>
@@ -84,7 +84,11 @@ void task(void*) {
             int mv = 0;
             error = adc_oneshot_get_calibrated_result(
                 adc, calibration, channel, &mv);
-            if (error != ESP_OK || mv <= 0) break;
+            if (error != ESP_OK) break;
+            if (mv <= 0) {
+                error = ESP_ERR_INVALID_RESPONSE;
+                break;
+            }
             if (!std::isfinite(ntcTemperatureC(mv))) {
                 error = ESP_ERR_INVALID_RESPONSE;
                 break;

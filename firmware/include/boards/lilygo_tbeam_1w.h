@@ -48,14 +48,12 @@ inline const BoardConfig BOARD = {
         .enable_active_high = false,
         .multiplier = 3.0f,
         .sample_count = 8,
-        .adc_attenuation_db = 11,
         .minimum_plausible_mv = 5500,
         .maximum_plausible_mv = 8600,
+        .adc_attenuation_db = 11,
     },
-    .thermistor = { .ntc_pin = 14, .fan_pin = 41 },
 
     .max_tx_power_dbm = 22,
-    .pa_ramp_time_us = 1700,
 
     .use_dio3_tcxo = true,
     .tcxo_voltage  = 3.0f,
@@ -80,4 +78,6 @@ inline const BoardConfig BOARD = {
         { 21, false }, // CTRL/LNA off before GPIO40 powers the module.
     },
     .static_gpio_count = 2,
+    .thermistor = { .ntc_pin = 14, .fan_pin = 41 },
+    .pa_ramp_time_us = 1700,
 };
