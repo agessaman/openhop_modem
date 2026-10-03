@@ -95,7 +95,7 @@
 // ─── Error codes ─────────────────────────────────────────────
 #define ERR_CRC_MISMATCH    0x01
 #define ERR_INVALID_CMD     0x02
-#define ERR_RADIO_BUSY      0x03
+#define ERR_RADIO_BUSY      0x03    // radio busy, or FEM request queue full
 #define ERR_TX_TIMEOUT      0x04
 #define ERR_PAYLOAD_TOO_BIG 0x05
 #define ERR_INVALID_CONFIG  0x06
@@ -188,7 +188,8 @@
 //  A set that arrives during an in-progress reception is held and
 //  applied once the reception ends. GET/SET_FEM_STATE replies,
 //  errors included, go out in the order the requests arrived. Up
-//  to 4 FEM requests can wait; beyond that ERR_RADIO_BUSY.
+//  to 4 FEM requests can wait; beyond that the modem replies
+//  ERR_RADIO_BUSY immediately, ahead of the waiting replies.
 //  FEM_STATE_RESP: capability(1B) | value(1B). Uncontrollable
 //  value bits are 0. Not persisted.
 //

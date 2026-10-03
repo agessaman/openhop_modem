@@ -331,8 +331,9 @@ scheme is gone, the same credential pair now covers every HTTP path.
 ## Wire protocol v0.8
 
 *(Full command list in `firmware/include/protocol.h`; the section below is
-summarised. Reported firmware version is `v0.8.0-<BoardConfig.fw_suffix>`,
-e.g. `v0.8.0-heltec_t114`.)*
+summarised. Reported firmware version is `<FW_VERSION_BASE>-<BoardConfig.fw_suffix>`,
+e.g. `v1.3.1-heltec-v43`. Hosts should probe `GET_RF_CAPS` for the v0.8 RF
+controls rather than compare versions.)*
 
 ### Frame format
 

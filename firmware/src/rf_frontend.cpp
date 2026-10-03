@@ -239,7 +239,10 @@ bool isExternalLnaEnabled() {
 
 FemState getFemState() {
     FemState state;
-    if (hasHeltecV43LnaControl() || hasStationG3LnaControl()) {
+    // Station G3 LNA writes go through setStationG3RfConfig(), which also
+    // needs PA control; without it the bit could be read but never set.
+    if (hasHeltecV43LnaControl() ||
+        (hasStationG3LnaControl() && hasPaModeControl())) {
         state.capability |= FEM_STATE_RX_LNA;
     }
     if (hasPaModeControl()) {

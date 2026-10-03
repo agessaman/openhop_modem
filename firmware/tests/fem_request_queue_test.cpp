@@ -70,12 +70,19 @@ void testFullQueueRejectsAndWraps() {
     assert(answered.size() == 4);
     for (uint8_t i = 0; i < 4; ++i) assert(answered[i].src == i);
 
-    // Head has advanced; the ring must keep order across the wrap.
-    assert(queue.push(set(0x01, 0x01, 10)));
-    assert(queue.push(get(11)));
+    // Leave the head mid-ring so later pushes wrap past the end.
+    assert(queue.push(get(20)));
+    assert(queue.push(set(0x01, 0x01, 21)));
+    assert(queue.push(get(22)));
+    answered = drain(queue, true);
+    assert(answered.size() == 1 && answered[0].src == 20);
+    assert(queue.push(get(23)));
+    assert(queue.push(error(0x06, 24)));
+    assert(!queue.push(get(25)));
     answered = drain(queue, false);
-    assert(answered.size() == 2);
-    assert(answered[0].src == 10 && answered[1].src == 11);
+    assert(answered.size() == 4);
+    assert(answered[0].src == 21 && answered[1].src == 22);
+    assert(answered[2].src == 23 && answered[3].src == 24);
 }
 
 }  // namespace
