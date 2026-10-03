@@ -82,7 +82,9 @@ def main() -> int:
     assert "setFemState(req.apply, req.value, false, fem)" in main
     assert "submitFemRequest(FemRequests::Kind::Set, payload[0], payload[1], src)" in main
     assert "applyRxBoostedGainMode(rxBoostedGainEnabled)" in main
-    assert "hasHeltecV43LnaControl()) return;" not in main
+    agc_body = main.split("void maybeResetAgc() {", 1)[1].split("\n}\n", 1)[0]
+    assert "hasAgcResetIntervalControl" not in agc_body
+    assert "hasHeltecV43LnaControl" not in agc_body
     fem_case = main.split("case CMD_SET_FEM_STATE:", 1)[1].split("case CMD_GET_RX_BOOST:", 1)[0]
     boost_case = main.split("case CMD_SET_RX_BOOST: {", 1)[1].split("case CMD_STATUS_REQ:", 1)[0]
     assert "ERR_RADIO_BUSY" not in fem_case

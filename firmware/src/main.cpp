@@ -674,7 +674,15 @@ static bool applyRxBoostedGainMode(bool enabled) {
     int state = radio.setRxBoostedGainMode(enabled);
     Serial.printf("[INFO] setRxBoostedGainMode(%s) -> %d\n",
                   enabled ? "true" : "false", state);
-    if (state != RADIOLIB_ERR_NONE) return false;
+    if (state != RADIOLIB_ERR_NONE) {
+        // RadioLib records the requested mode before writing and resetAGC()
+        // re-applies it, and the gain register may already have changed.
+        // Put both back so the previous mode really stays in effect.
+        if (enabled != rxBoostedGainEnabled) {
+            radio.setRxBoostedGainMode(rxBoostedGainEnabled);
+        }
+        return false;
+    }
     rxBoostedGainEnabled = enabled;
     return true;
 }
