@@ -185,7 +185,10 @@
 //
 //  SET_FEM_STATE: apply(1B) | value(1B). Bits outside the board
 //  capability mask return ERR_UNSUPPORTED and change nothing.
-//  A set during TX or an in-progress reception returns ERR_RADIO_BUSY.
+//  A set that arrives during an in-progress reception is held and
+//  applied once the reception ends. GET/SET_FEM_STATE replies,
+//  errors included, go out in the order the requests arrived. Up
+//  to 4 FEM requests can wait; beyond that ERR_RADIO_BUSY.
 //  FEM_STATE_RESP: capability(1B) | value(1B). Uncontrollable
 //  value bits are 0. Not persisted.
 //

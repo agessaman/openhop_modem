@@ -20,6 +20,7 @@
 #include "frame_parser.h"
 #include "compat.h"
 #include "rf_frontend.h"
+#include "fem_request_queue.h"
 #include "agc_maintenance.h"
 #include "station_g3_power.h"
 #include "environment_sensor.h"
@@ -1007,6 +1008,50 @@ void handleLoRaRx() {
     startReceive();
 }
 
+// ─── FEM requests ───────────────────────────────────────────
+// Switching the FEM LNA or PA mid-packet would corrupt the frame on air, so a
+// SET_FEM_STATE that arrives during a reception waits for it to finish
+// instead of being rejected. TX needs no check here: TX_REQUEST holds the
+// loop until TX_DONE, so a request sent during TX is read after it.
+static constexpr uint8_t FEM_REQUEST_QUEUE_DEPTH = 4;
+static FemRequests::Queue<TransportSource, FEM_REQUEST_QUEUE_DEPTH> femRequests;
+
+static void answerFemRequest(const FemRequests::Request<TransportSource>& req) {
+    RFFrontEnd::FemState fem;
+    switch (req.kind) {
+    case FemRequests::Kind::Error:
+        sendError(req.value, req.src);
+        return;
+    case FemRequests::Kind::Set:
+        if (!RFFrontEnd::setFemState(req.apply, req.value, false, fem)) {
+            sendError(ERR_UNSUPPORTED, req.src);
+            return;
+        }
+        break;
+    case FemRequests::Kind::Get:
+        fem = RFFrontEnd::getFemState();
+        break;
+    }
+    uint8_t buf[2] = { fem.capability, fem.value };
+    sendFrame(CMD_FEM_STATE_RESP, buf, sizeof(buf), req.src);
+}
+
+static void processFemRequests() {
+    if (femRequests.size() == 0) return;
+    femRequests.drain(
+        []() { return !radioStandby && isReceivingPacket(); },
+        answerFemRequest);
+}
+
+static void submitFemRequest(FemRequests::Kind kind, uint8_t apply,
+                             uint8_t value, TransportSource src) {
+    if (!femRequests.push({ kind, apply, value, src })) {
+        sendError(ERR_RADIO_BUSY, src);
+        return;
+    }
+    processFemRequests();
+}
+
 // ─── Host command dispatch ──────────────────────────────────
 void processHostCommand(uint8_t cmd, const uint8_t* payload, uint16_t len,
                         TransportSource src) {
@@ -1394,31 +1439,17 @@ void processHostCommand(uint8_t cmd, const uint8_t* payload, uint16_t len,
         break;
     }
 
-    case CMD_GET_FEM_STATE: {
-        const RFFrontEnd::FemState fem = RFFrontEnd::getFemState();
-        uint8_t buf[2] = { fem.capability, fem.value };
-        sendFrame(CMD_FEM_STATE_RESP, buf, sizeof(buf), src);
+    case CMD_GET_FEM_STATE:
+        submitFemRequest(FemRequests::Kind::Get, 0, 0, src);
         break;
-    }
 
-    case CMD_SET_FEM_STATE: {
+    case CMD_SET_FEM_STATE:
         if (len != 2) {
-            sendError(ERR_INVALID_CONFIG, src);
+            submitFemRequest(FemRequests::Kind::Error, 0, ERR_INVALID_CONFIG, src);
             break;
         }
-        if (isTxActive || isReceivingPacket()) {
-            sendError(ERR_RADIO_BUSY, src);
-            break;
-        }
-        RFFrontEnd::FemState fem;
-        if (!RFFrontEnd::setFemState(payload[0], payload[1], false, fem)) {
-            sendError(ERR_UNSUPPORTED, src);
-            break;
-        }
-        uint8_t buf[2] = { fem.capability, fem.value };
-        sendFrame(CMD_FEM_STATE_RESP, buf, sizeof(buf), src);
+        submitFemRequest(FemRequests::Kind::Set, payload[0], payload[1], src);
         break;
-    }
 
     case CMD_GET_RX_BOOST: {
         uint8_t state = rxBoostedGainEnabled ? 1 : 0;
@@ -2140,6 +2171,7 @@ void loop() {
     GPSManager::loop();
 #endif
 
+    processFemRequests();
     sampleNoiseFloor();
     maybeResetAgc();
     EthernetManager::loop();

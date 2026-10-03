@@ -79,12 +79,17 @@ def main() -> int:
     assert "bool setFemState(uint8_t apply, uint8_t value, bool persist, FemState& out);" in frontend
     assert "applyFemMask(" in source
     assert "setAgcResetIntervalSec(sec, false)" in main
-    assert "setFemState(payload[0], payload[1], false, fem)" in main
+    assert "setFemState(req.apply, req.value, false, fem)" in main
+    assert "submitFemRequest(FemRequests::Kind::Set, payload[0], payload[1], src)" in main
     assert "applyRxBoostedGainMode(rxBoostedGainEnabled)" in main
     assert "hasHeltecV43LnaControl()) return;" not in main
-    fem_case = main.split("case CMD_SET_FEM_STATE: {", 1)[1].split("case CMD_GET_RX_BOOST:", 1)[0]
+    fem_case = main.split("case CMD_SET_FEM_STATE:", 1)[1].split("case CMD_GET_RX_BOOST:", 1)[0]
     boost_case = main.split("case CMD_SET_RX_BOOST: {", 1)[1].split("case CMD_STATUS_REQ:", 1)[0]
-    assert "isReceivingPacket()" in fem_case
+    assert "ERR_RADIO_BUSY" not in fem_case
+    fem_drain = main.split("static void processFemRequests() {", 1)[1].split("static void submitFemRequest(", 1)[0]
+    assert "isReceivingPacket()" in fem_drain
+    loop = main.split("void loop() {", 1)[1]
+    assert "processFemRequests();" in loop
     agc_reset = main.split("void maybeResetAgc() {", 1)[1].split("radio.standby();", 1)[0]
     assert "isReceivingPacket()" in agc_reset
     assert "const bool applied = applyRxBoostedGainMode" in boost_case
@@ -92,24 +97,25 @@ def main() -> int:
 
     compiler = shutil.which("g++")
     if compiler is None:
-        raise SystemExit("g++ is required for the FEM mask test")
+        raise SystemExit("g++ is required for the FEM unit tests")
     with tempfile.TemporaryDirectory(prefix="openhop-rf-fem-") as temp_dir:
-        executable = pathlib.Path(temp_dir) / "rf_fem_state_test"
-        subprocess.run(
-            [
-                compiler,
-                "-std=c++17",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                f"-I{FIRMWARE / 'include'}",
-                str(FIRMWARE / "tests" / "rf_fem_state_test.cpp"),
-                "-o",
-                str(executable),
-            ],
-            check=True,
-        )
-        subprocess.run([str(executable)], check=True)
+        for test in ("rf_fem_state_test", "fem_request_queue_test"):
+            executable = pathlib.Path(temp_dir) / test
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++17",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{FIRMWARE / 'include'}",
+                    str(FIRMWARE / "tests" / f"{test}.cpp"),
+                    "-o",
+                    str(executable),
+                ],
+                check=True,
+            )
+            subprocess.run([str(executable)], check=True)
 
     print("RF frame control contract: PASS")
     return 0
