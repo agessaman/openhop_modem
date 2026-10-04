@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-namespace FemRequests {
+namespace RfRequests {
 
 enum class Kind : uint8_t {
     Get,
@@ -10,17 +10,24 @@ enum class Kind : uint8_t {
     Error,
 };
 
+enum class Target : uint8_t {
+    Fem,
+    RxBoost,
+};
+
 template <typename Source>
 struct Request {
     Kind kind;
-    uint8_t apply;   // Set
+    Target target;
+    uint8_t apply;   // FEM Set
     uint8_t value;   // Set; error code for Error
     Source src;
 };
 
-// FEM replies, errors included, go out in arrival order: ERROR frames do not
-// name a command, so the host matches them to requests by order. A Set waits
-// while mustWait() holds, and every request queued behind it waits too.
+// FEM and RX boost replies, errors included, go out in arrival order: ERROR
+// frames do not name a command, so the host matches them to requests by
+// order. A Set waits while mustWait() holds, and every request queued behind
+// it waits too.
 template <typename Source, uint8_t Depth>
 class Queue {
 public:
@@ -50,4 +57,4 @@ private:
     uint8_t count_ = 0;
 };
 
-}  // namespace FemRequests
+}  // namespace RfRequests

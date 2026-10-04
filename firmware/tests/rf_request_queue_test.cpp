@@ -1,4 +1,4 @@
-#include "fem_request_queue.h"
+#include "rf_request_queue.h"
 
 #include <cassert>
 #include <iostream>
@@ -6,13 +6,15 @@
 
 namespace {
 
-using FemRequests::Kind;
-using Request = FemRequests::Request<uint8_t>;
-using Queue = FemRequests::Queue<uint8_t, 4>;
+using RfRequests::Kind;
+using RfRequests::Target;
+using Request = RfRequests::Request<uint8_t>;
+using Queue = RfRequests::Queue<uint8_t, 4>;
 
-Request get(uint8_t src) { return Request{ Kind::Get, 0, 0, src }; }
-Request set(uint8_t apply, uint8_t value, uint8_t src) { return Request{ Kind::Set, apply, value, src }; }
-Request error(uint8_t code, uint8_t src) { return Request{ Kind::Error, 0, code, src }; }
+Request get(uint8_t src) { return Request{ Kind::Get, Target::Fem, 0, 0, src }; }
+Request set(uint8_t apply, uint8_t value, uint8_t src) { return Request{ Kind::Set, Target::Fem, apply, value, src }; }
+Request error(uint8_t code, uint8_t src) { return Request{ Kind::Error, Target::Fem, 0, code, src }; }
+Request boostSet(uint8_t value, uint8_t src) { return Request{ Kind::Set, Target::RxBoost, 0, value, src }; }
 
 std::vector<Request> drain(Queue& queue, bool busy) {
     std::vector<Request> answered;
@@ -85,6 +87,18 @@ void testFullQueueRejectsAndWraps() {
     assert(answered[2].src == 23 && answered[3].src == 24);
 }
 
+void testRxBoostSetHoldsFemRepliesInOrder() {
+    Queue queue;
+    assert(queue.push(boostSet(1, 1)));
+    assert(queue.push(get(2)));
+    assert(drain(queue, true).empty());
+
+    const auto answered = drain(queue, false);
+    assert(answered.size() == 2);
+    assert(answered[0].target == Target::RxBoost && answered[0].value == 1);
+    assert(answered[1].target == Target::Fem && answered[1].kind == Kind::Get);
+}
+
 }  // namespace
 
 int main() {
@@ -92,6 +106,7 @@ int main() {
     testGetAndErrorDoNotWait();
     testSetHoldsLaterRequestsInOrder();
     testFullQueueRejectsAndWraps();
-    std::cout << "fem request queue tests passed\n";
+    testRxBoostSetHoldsFemRepliesInOrder();
+    std::cout << "rf request queue tests passed\n";
     return 0;
 }

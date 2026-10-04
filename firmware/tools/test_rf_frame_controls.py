@@ -80,28 +80,31 @@ def main() -> int:
     assert "applyFemMask(" in source
     assert "setAgcResetIntervalSec(sec, false)" in main
     assert "setFemState(req.apply, req.value, false, fem)" in main
-    assert "submitFemRequest(FemRequests::Kind::Set, payload[0], payload[1], src)" in main
+    assert "RfRequests::Target::Fem,\n                        payload[0], payload[1], src)" in main
+    assert "RfRequests::Target::RxBoost,\n                        0, payload[0], src)" in main
     assert "applyRxBoostedGainMode(rxBoostedGainEnabled)" in main
     agc_body = main.split("void maybeResetAgc() {", 1)[1].split("\n}\n", 1)[0]
     assert "hasAgcResetIntervalControl" not in agc_body
     assert "hasHeltecV43LnaControl" not in agc_body
     fem_case = main.split("case CMD_SET_FEM_STATE:", 1)[1].split("case CMD_GET_RX_BOOST:", 1)[0]
-    boost_case = main.split("case CMD_SET_RX_BOOST: {", 1)[1].split("case CMD_STATUS_REQ:", 1)[0]
+    boost_case = main.split("case CMD_SET_RX_BOOST:", 1)[1].split("case CMD_STATUS_REQ:", 1)[0]
     assert "ERR_RADIO_BUSY" not in fem_case
-    fem_drain = main.split("static void processFemRequests() {", 1)[1].split("static void submitFemRequest(", 1)[0]
-    assert "isReceivingPacket()" in fem_drain
+    assert "ERR_RADIO_BUSY" not in boost_case
+    rf_drain = main.split("static void processRfRequests() {", 1)[1].split("static void submitRfRequest(", 1)[0]
+    assert "isReceivingPacket()" in rf_drain
     loop = main.split("void loop() {", 1)[1]
-    assert "processFemRequests();" in loop
+    assert "processRfRequests();" in loop
     agc_reset = main.split("void maybeResetAgc() {", 1)[1].split("radio.standby();", 1)[0]
     assert "isReceivingPacket()" in agc_reset
-    assert "const bool applied = applyRxBoostedGainMode" in boost_case
-    assert "sendError(ERR_RADIO_INIT, src)" in boost_case
+    boost_answer = main.split("static void answerRxBoostRequest(", 1)[1].split("static void answerRfRequest(", 1)[0]
+    assert "const bool applied = applyRxBoostedGainMode" in boost_answer
+    assert "sendError(ERR_RADIO_INIT, req.src)" in boost_answer
 
     compiler = shutil.which("g++")
     if compiler is None:
         raise SystemExit("g++ is required for the FEM unit tests")
     with tempfile.TemporaryDirectory(prefix="openhop-rf-fem-") as temp_dir:
-        for test in ("rf_fem_state_test", "fem_request_queue_test"):
+        for test in ("rf_fem_state_test", "rf_request_queue_test"):
             executable = pathlib.Path(temp_dir) / test
             subprocess.run(
                 [

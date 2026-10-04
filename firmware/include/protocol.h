@@ -186,9 +186,10 @@
 //  SET_FEM_STATE: apply(1B) | value(1B). Bits outside the board
 //  capability mask return ERR_UNSUPPORTED and change nothing.
 //  A set that arrives during an in-progress reception is held and
-//  applied once the reception ends. GET/SET_FEM_STATE replies,
-//  errors included, go out in the order the requests arrived. Up
-//  to 4 FEM requests can wait; beyond that the modem replies
+//  applied once the reception ends. GET/SET_FEM_STATE and
+//  GET/SET_RX_BOOST share one queue: their replies, errors
+//  included, go out in the order the requests arrived. Up to 4
+//  of these requests can wait; beyond that the modem replies
 //  ERR_RADIO_BUSY immediately, ahead of the waiting replies.
 //  FEM_STATE_RESP: capability(1B) | value(1B). Uncontrollable
 //  value bits are 0. Not persisted.
@@ -196,8 +197,9 @@
 // ─── RX boosted gain (SET_RX_BOOST / RX_BOOST_RESP) ─────────
 //
 //  1 byte: 0 = power-saving, 1 = boosted. Any other value is
-//  ERR_INVALID_CONFIG. A set during TX or an in-progress reception
-//  returns ERR_RADIO_BUSY. If the SX1262 rejects the write, the
+//  ERR_INVALID_CONFIG. A set during an in-progress reception is held
+//  and applied once the reception ends, in order with FEM requests
+//  (see above). If the SX1262 rejects the write, the
 //  modem restores RX when it left it and replies ERR_RADIO_INIT;
 //  the previous mode stays in effect. Success replies with the
 //  applied state. Not persisted. An AGC reset re-applies it.
