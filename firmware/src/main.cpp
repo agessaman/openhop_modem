@@ -276,8 +276,8 @@ static _WiFiStub WiFi;
 
 // ─── Version ─────────────────────────────────────────────────
 // Base version is shared by every board; the board's fw_suffix
-// distinguishes one binary from another (e.g. "v1.3.1-ikoka").
-#define FW_VERSION_BASE "v1.3.1"
+// distinguishes one binary from another (e.g. "v1.4.0-ikoka").
+#define FW_VERSION_BASE "v1.4.0"
 static String fwVersion;   // populated in setup()
 
 // ─── Task watchdog — self-heal on loop() hang ───────────────
