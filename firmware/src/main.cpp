@@ -736,10 +736,13 @@ static void writeFrame(uint8_t cmd, const uint8_t* payload, uint16_t len,
 // on the modem until the next Serial write. Re-arming the IN_EMPTY interrupt
 // alone does not release it; a FIFO flush does, as HWCDC::write() and
 // HWCDC::flush() do. Kick the FIFO when bytes have been waiting too long.
+#if defined(OPENHOP_HWCDC_TX_KICK)
+static UsbTxStallWatch usbTxStallWatch(20);
+#endif
+
 static void kickStalledUsbSerialTx() {
 #if defined(OPENHOP_HWCDC_TX_KICK)
-    static UsbTxStallWatch watch(20);
-    if (!watch.update(Serial.availableForWrite(), millis())) return;
+    if (!usbTxStallWatch.update(Serial.availableForWrite(), millis())) return;
     usb_serial_jtag_ll_txfifo_flush();
     usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
 #endif
@@ -1616,6 +1619,10 @@ void setup() {
 #endif
 
     Serial.begin(921600);
+#if defined(OPENHOP_HWCDC_TX_KICK)
+    // Nothing has been written yet, so this is the empty TX buffer size.
+    usbTxStallWatch.prime(Serial.availableForWrite());
+#endif
     // On boards with native USB-CDC (Ikoka, LilyGO T3-S3) the first
     // Serial output races against the host opening the CDC endpoint —
     // anything printed before the host attaches is silently dropped.

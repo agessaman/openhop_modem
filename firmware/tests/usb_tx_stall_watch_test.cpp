@@ -70,10 +70,19 @@ void testRearmsAfterKick() {
     assert(watch.update(PENDING, 2 * STALL_MS));
 }
 
+void testPrimedWatchSeesBytesStuckAtFirstCheck() {
+    // Boot output can already be stuck when the loop first checks.
+    UsbTxStallWatch watch(STALL_MS);
+    watch.prime(IDLE);
+    assert(!watch.update(PENDING, 0));
+    assert(!watch.update(PENDING, STALL_MS - 1));
+    assert(watch.update(PENDING, STALL_MS));
+}
+
 void testIdleSizeLearnedFromLargestFree() {
     UsbTxStallWatch watch(STALL_MS);
-    // First observation already has bytes pending; it becomes the idle size
-    // until a larger free count shows the real one.
+    // Unprimed, the first observation becomes the idle size until a larger
+    // free count shows the real one.
     assert(!watch.update(PENDING, 0));
     assert(!watch.update(PENDING, STALL_MS));
     assert(!watch.update(IDLE, STALL_MS));
@@ -90,6 +99,7 @@ int main() {
     testMillisWraparound();
     testDrainResetsTimer();
     testRearmsAfterKick();
+    testPrimedWatchSeesBytesStuckAtFirstCheck();
     testIdleSizeLearnedFromLargestFree();
     return 0;
 }
