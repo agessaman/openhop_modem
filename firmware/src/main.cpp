@@ -56,6 +56,7 @@
 #  include "pmu_manager.h"
 #  if ARDUINO_USB_MODE && ARDUINO_USB_CDC_ON_BOOT && SOC_USB_SERIAL_JTAG_SUPPORTED
 #    include "hal/usb_serial_jtag_ll.h"
+#    include "usb_tx_stall_watch.h"
 #    define OPENHOP_HWCDC_TX_KICK 1
 #  endif
 #else
@@ -737,25 +738,10 @@ static void writeFrame(uint8_t cmd, const uint8_t* payload, uint16_t len,
 // HWCDC::flush() do. Kick the FIFO when bytes have been waiting too long.
 static void kickStalledUsbSerialTx() {
 #if defined(OPENHOP_HWCDC_TX_KICK)
-    static constexpr uint32_t STALL_MS = 20;
-    static int idleFree = 0;
-    static uint32_t pendingSince = 0;
-
-    const int freeBytes = Serial.availableForWrite();
-    if (freeBytes > idleFree) idleFree = freeBytes;
-    if (freeBytes >= idleFree) {
-        pendingSince = 0;
-        return;
-    }
-    const uint32_t now = millis();
-    if (pendingSince == 0) {
-        pendingSince = now | 1;
-        return;
-    }
-    if (now - pendingSince < STALL_MS) return;
+    static UsbTxStallWatch watch(20);
+    if (!watch.update(Serial.availableForWrite(), millis())) return;
     usb_serial_jtag_ll_txfifo_flush();
     usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
-    pendingSince = 0;
 #endif
 }
 
