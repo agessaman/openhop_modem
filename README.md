@@ -422,7 +422,7 @@ Modem bootloader, which is not currently planned. Use the generated
 | 0x93 | OTA_CHUNK_RESP    | — (v0.7)                              |
 | 0x95 | OTA_VERIFY_RESP   | — (v0.7)                              |
 | 0x97 | OTA_APPLY_RESP    | — (v0.7)                              |
-| 0xFE | ERROR             | error code (1 B; `0x0B` = `ERR_NO_RADIO`, `0x0F` = `ERR_UNSUPPORTED`) |
+| 0xFE | ERROR             | error code (1 B; `0x0B` = `ERR_NO_RADIO`, `0x0F` = `ERR_UNSUPPORTED`, `0x10` = `ERR_RADIO_FAULT`) |
 | 0xFF | PONG              | —                                     |
 
 ## Default radio parameters

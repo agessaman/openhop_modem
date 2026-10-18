@@ -21,6 +21,7 @@
 #include "compat.h"
 #include "rf_frontend.h"
 #include "rf_request_queue.h"
+#include "rx_boost_control.h"
 #include "agc_maintenance.h"
 #include "station_g3_power.h"
 #include "environment_sensor.h"
@@ -363,7 +364,7 @@ static volatile bool dio1Flag    = false;
 static volatile uint32_t dio1IrqCount = 0;
 static bool        radioReady    = false;
 static bool        isTxActive    = false;
-static bool        rxBoostedGainEnabled = false;
+static RxBoostControl::State rxBoost;
 static bool        radioTxReady  = false;
 
 // ─── Noise floor sampling ────────────────────────────────────
@@ -509,7 +510,7 @@ Snapshot capture() {
     snap.status.uptime_sec = millis() / 1000;
     // StatusResp reserves state 2 for errors; standby remains a healthy idle
     // state and is exposed separately in this richer runtime snapshot.
-    snap.status.radio_state = isTxActive ? 1 : 0;
+    snap.status.radio_state = isTxActive ? 1 : (rxBoost.fault ? 2 : 0);
     snap.status.temp_c = RuntimeStatsValues::cpuTemperatureC(
         compatReadCpuTemperature());
     snap.status.noise_floor_x10 = (int16_t)(noiseFloor * 10.0f);
@@ -677,21 +678,37 @@ static void rfSwitchConfigureRadio() {
     }
 }
 
-static bool applyRxBoostedGainMode(bool enabled) {
-    int state = radio.setRxBoostedGainMode(enabled);
-    Serial.printf("[INFO] setRxBoostedGainMode(%s) -> %d\n",
-                  enabled ? "true" : "false", state);
-    if (state != RADIOLIB_ERR_NONE) {
-        // RadioLib records the requested mode before writing and resetAGC()
-        // re-applies it, and the gain register may already have changed.
-        // Put both back so the previous mode really stays in effect.
-        if (enabled != rxBoostedGainEnabled) {
-            radio.setRxBoostedGainMode(rxBoostedGainEnabled);
-        }
-        return false;
+bool startReceive();
+
+// Every boosted-gain write goes through RxBoostControl::set so a failed
+// write, rollback, or RX restart leaves rxBoost.fault set rather than a
+// cached mode the chip may not be in. settleMs is a pause after standby.
+static RxBoostControl::Result setRxBoostedGain(bool enabled, bool resumeRx,
+                                               uint32_t settleMs = 0) {
+    const auto result = RxBoostControl::set(
+        rxBoost, enabled, resumeRx, (int16_t)RADIOLIB_ERR_NONE,
+        [settleMs]() {
+            const int16_t state = radio.standby();
+            if (settleMs != 0) delay(settleMs);
+            return state;
+        },
+        [](bool on) {
+            const int16_t state = radio.setRxBoostedGainMode(on);
+            Serial.printf("[INFO] setRxBoostedGainMode(%s) -> %d\n",
+                          on ? "true" : "false", state);
+            return state;
+        },
+        []() { return startReceive(); });
+    if (result.standbyState != RADIOLIB_ERR_NONE) {
+        Serial.printf("[RXBOOST] standby failed: %d\n", result.standbyState);
     }
-    rxBoostedGainEnabled = enabled;
-    return true;
+    if (result.rollbackAttempted && result.rollbackState != RADIOLIB_ERR_NONE) {
+        Serial.printf("[RXBOOST] rollback failed: %d\n", result.rollbackState);
+    }
+    if (result.rxRestartAttempted && !result.rxRestarted) {
+        Serial.println("[RXBOOST] RX restart failed");
+    }
+    return result;
 }
 
 static void configureBoardRadioOptions() {
@@ -701,9 +718,10 @@ static void configureBoardRadioOptions() {
                       (int)BOARD.sx126x_current_limit_ma, state);
     }
 
-    rxBoostedGainEnabled = false;
+    rxBoost = RxBoostControl::State();
     if (BOARD.sx126x_rx_boosted_gain) {
-        applyRxBoostedGainMode(true);
+        // setup() starts RX after the config is applied.
+        setRxBoostedGain(true, false);
     }
 
     if (BOARD.sx126x_register_patch) {
@@ -1052,18 +1070,15 @@ static void answerFemRequest(const RfRequests::Request<TransportSource>& req) {
 }
 
 static void answerRxBoostRequest(const RfRequests::Request<TransportSource>& req) {
-    if (req.kind == RfRequests::Kind::Set) {
-        const bool resumeRx = !radioStandby;
-        radio.standby();
-        const bool applied = applyRxBoostedGainMode(req.value != 0);
-        if (resumeRx) startReceive();
-        if (!applied) {
-            sendError(ERR_RADIO_INIT, req.src);
-            return;
-        }
+    const RxBoostControl::Reply reply = req.kind == RfRequests::Kind::Set
+        ? RxBoostControl::replyFor(
+              rxBoost, setRxBoostedGain(req.value != 0, !radioStandby).outcome)
+        : RxBoostControl::replyForGet(rxBoost);
+    if (reply.error != 0) {
+        sendError(reply.error, req.src);
+        return;
     }
-    uint8_t state = rxBoostedGainEnabled ? 1 : 0;
-    sendFrame(CMD_RX_BOOST_RESP, &state, 1, req.src);
+    sendFrame(CMD_RX_BOOST_RESP, &reply.enabled, 1, req.src);
 }
 
 static void answerRfRequest(const RfRequests::Request<TransportSource>& req) {
@@ -2140,10 +2155,7 @@ void maybeResetAgc() {
     // A brief RX restart clears it without disturbing TX or packet IRQs.
     // The boosted-gain register is written again because the restart
     // drops the chip through standby.
-    radio.standby();
-    delay(2);
-    applyRxBoostedGainMode(rxBoostedGainEnabled);
-    startReceive();
+    setRxBoostedGain(rxBoost.enabled, true, 2);
     agcMaintenanceSchedule.recordAttempt(millis());
     noiseFloorSum = 0.0f;
     noiseFloorCount = 0;

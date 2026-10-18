@@ -25,6 +25,7 @@ EXPECTED_COMMANDS = {
     "CMD_GET_RX_BOOST": 0x1D,
     "CMD_RX_BOOST_RESP": 0x1E,
     "ERR_UNSUPPORTED": 0x0F,
+    "ERR_RADIO_FAULT": 0x10,
     "RF_CAP_AGC": 0x01,
     "RF_CAP_FEM_RX_LNA": 0x02,
     "RF_CAP_FEM_TX_PA": 0x04,
@@ -82,7 +83,10 @@ def main() -> int:
     assert "setFemState(req.apply, req.value, false, fem)" in main
     assert "RfRequests::Target::Fem,\n                        payload[0], payload[1], src)" in main
     assert "RfRequests::Target::RxBoost,\n                        0, payload[0], src)" in main
-    assert "applyRxBoostedGainMode(rxBoostedGainEnabled)" in main
+    assert "setRxBoostedGain(rxBoost.enabled, true, 2)" in main
+    assert "radio.setRxBoostedGainMode(" in main.split("static RxBoostControl::Result setRxBoostedGain(", 1)[1].split("\n}\n", 1)[0]
+    assert main.count("radio.setRxBoostedGainMode(") == 1, "boost writes must go through RxBoostControl::set"
+    assert "rxBoost.fault ? 2 : 0" in main
     agc_body = main.split("void maybeResetAgc() {", 1)[1].split("\n}\n", 1)[0]
     assert "hasAgcResetIntervalControl" not in agc_body
     assert "hasHeltecV43LnaControl" not in agc_body
@@ -97,14 +101,16 @@ def main() -> int:
     agc_reset = main.split("void maybeResetAgc() {", 1)[1].split("radio.standby();", 1)[0]
     assert "isReceivingPacket()" in agc_reset
     boost_answer = main.split("static void answerRxBoostRequest(", 1)[1].split("static void answerRfRequest(", 1)[0]
-    assert "const bool applied = applyRxBoostedGainMode" in boost_answer
-    assert "sendError(ERR_RADIO_INIT, req.src)" in boost_answer
+    assert "RxBoostControl::replyFor(" in boost_answer
+    assert "setRxBoostedGain(req.value != 0, !radioStandby)" in boost_answer
+    assert "RxBoostControl::replyForGet(rxBoost)" in boost_answer
+    assert "sendError(reply.error, req.src)" in boost_answer
 
     compiler = shutil.which("g++")
     if compiler is None:
         raise SystemExit("g++ is required for the FEM unit tests")
     with tempfile.TemporaryDirectory(prefix="openhop-rf-fem-") as temp_dir:
-        for test in ("rf_fem_state_test", "rf_request_queue_test"):
+        for test in ("rf_fem_state_test", "rf_request_queue_test", "rx_boost_control_test"):
             executable = pathlib.Path(temp_dir) / test
             subprocess.run(
                 [

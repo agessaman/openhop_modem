@@ -100,7 +100,7 @@
 #define ERR_PAYLOAD_TOO_BIG 0x05
 #define ERR_INVALID_CONFIG  0x06
 #define ERR_CAD_FAILED      0x07
-#define ERR_RADIO_INIT      0x08    // SX1262 init failed, or SET_RX_BOOST was rejected
+#define ERR_RADIO_INIT      0x08    // SX1262 init failed, or SET_RX_BOOST was rejected and rolled back
 #define ERR_UNAUTHORIZED    0x09    // TCP client did not authenticate
 #define ERR_INVALID_WIFI    0x0A    // SET_WIFI payload malformed
 #define ERR_NO_RADIO        0x0B    // board has no LoRa radio attached
@@ -109,6 +109,7 @@
 #define ERR_OTA_NO_BUFFER   0x0D    // image too big or no PSRAM/flash space
 #define ERR_CHANNEL_BUSY    0x0E    // auto-CAD detected busy after all retries
 #define ERR_UNSUPPORTED     0x0F    // v0.8 — command known, control absent on this board
+#define ERR_RADIO_FAULT     0x10    // v0.8 — RX boost rollback or RX restart failed; radio state unknown
 
 // RF_CAPS_RESP feature bits. Hosts probe these rather than the firmware version.
 #define RF_CAP_AGC              0x00000001u
@@ -199,10 +200,14 @@
 //  1 byte: 0 = power-saving, 1 = boosted. Any other value is
 //  ERR_INVALID_CONFIG. A set during an in-progress reception is held
 //  and applied once the reception ends, in order with FEM requests
-//  (see above). If the SX1262 rejects the write, the
-//  modem restores RX when it left it and replies ERR_RADIO_INIT;
-//  the previous mode stays in effect. Success replies with the
-//  applied state. Not persisted. An AGC reset re-applies it.
+//  (see above). If the SX1262 rejects the write, the modem writes
+//  the previous mode back, restores RX when it left it, and replies
+//  ERR_RADIO_INIT; the previous mode stays in effect. If that
+//  rollback or the RX restart also fails, it replies
+//  ERR_RADIO_FAULT, STATUS reports radio_state 2, and GET_RX_BOOST
+//  returns ERR_RADIO_FAULT until a later SET_RX_BOOST succeeds.
+//  Success replies with the applied state. Not persisted. An AGC
+//  reset re-applies it.
 //
 // ─── WIFI_STATUS payload (variable) ─────────────────────────
 //
