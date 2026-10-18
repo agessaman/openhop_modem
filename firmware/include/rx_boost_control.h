@@ -36,7 +36,8 @@ struct Result {
 // restart is attempted on every path that left a running receiver.
 //
 // A successful write or rollback leaves the mode known, so it clears an
-// earlier fault: a host recovers by sending SET_RX_BOOST again.
+// earlier fault: a host recovers by sending SET_RX_BOOST again, and the AGC
+// reset on non-Station boards re-applies the mode through here too.
 template <typename StandbyFn, typename WriteFn, typename RestartRxFn>
 Result set(State& state, bool requested, bool resumeRx, int16_t successState,
            StandbyFn standby, WriteFn write, RestartRxFn restartRx) {
@@ -72,6 +73,16 @@ Result set(State& state, bool requested, bool resumeRx, int16_t successState,
         result.outcome = Outcome::Rejected;
     }
     return result;
+}
+
+// Station boards reset AGC with RadioLib's resetAGC(), which re-applies the
+// boosted-gain mode RadioLib last recorded. A failed reset may leave that
+// write undone, and a failed RX restart leaves the receiver down, so either
+// marks a fault. Success does not clear one: after a failed rollback,
+// RadioLib's recorded mode is not known to match state.enabled.
+inline void noteAgcReset(State& state, bool resetAttempted, bool resetOk,
+                         bool rxRestarted) {
+    if ((resetAttempted && !resetOk) || !rxRestarted) state.fault = true;
 }
 
 // Reply to SET_RX_BOOST / GET_RX_BOOST: an error code, or 0 and the mode.

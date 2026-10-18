@@ -205,7 +205,11 @@
 //  ERR_RADIO_INIT; the previous mode stays in effect. If that
 //  rollback or the RX restart also fails, it replies
 //  ERR_RADIO_FAULT, STATUS reports radio_state 2, and GET_RX_BOOST
-//  returns ERR_RADIO_FAULT until a later SET_RX_BOOST succeeds.
+//  returns ERR_RADIO_FAULT. A failed AGC reset or RX restart during
+//  AGC maintenance raises the same fault. It clears once a boosted-gain
+//  write or rollback succeeds and RX resumes: a later SET_RX_BOOST
+//  (even one that replies ERR_RADIO_INIT after a clean rollback), or
+//  the AGC reset on boards other than Station G2/G3.
 //  Success replies with the applied state. Not persisted. An AGC
 //  reset re-applies it.
 //

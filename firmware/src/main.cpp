@@ -2132,6 +2132,9 @@ void maybeResetAgc() {
     if (!result.rxRestarted) {
         Serial.println("[AGC] RX restart failed");
     }
+    RxBoostControl::noteAgcReset(
+        rxBoost, result.resetAttempted,
+        result.resetState == RADIOLIB_ERR_NONE, result.rxRestarted);
     if (!result.succeeded(RADIOLIB_ERR_NONE)) return;
 
     lastSuccessfulAgcResetMs = attemptedAt;

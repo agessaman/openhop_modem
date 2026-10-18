@@ -173,6 +173,32 @@ void testSuccessfulRollbackClearsFault() {
     assert(!state.fault && !state.enabled);
 }
 
+void testAgcResetFailuresRaiseFault() {
+    struct Case { bool attempted, resetOk, rxOk, fault; };
+    const Case cases[] = {
+        {true, true, true, false},
+        {false, true, true, false},   // standby failed, RX resumed
+        {true, false, true, true},    // resetAGC failed: gain write in doubt
+        {true, true, false, true},    // RX did not resume
+        {false, true, false, true},
+    };
+    for (const Case& c : cases) {
+        RxBoostControl::State state;
+        state.enabled = true;
+        RxBoostControl::noteAgcReset(state, c.attempted, c.resetOk, c.rxOk);
+        assert(state.fault == c.fault);
+        assert(state.enabled);
+    }
+}
+
+void testAgcResetSuccessKeepsFault() {
+    RxBoostControl::State state;
+    state.fault = true;
+    RxBoostControl::noteAgcReset(state, true, true, true);
+    assert(state.fault);
+    assert(RxBoostControl::replyForGet(state).error == ERR_RADIO_FAULT);
+}
+
 }  // namespace
 
 int main() {
@@ -188,5 +214,7 @@ int main() {
     testSuccessfulSetClearsFault();
     testStandbyFailureKeepsFault();
     testSuccessfulRollbackClearsFault();
+    testAgcResetFailuresRaiseFault();
+    testAgcResetSuccessKeepsFault();
     return 0;
 }

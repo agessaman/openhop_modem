@@ -87,6 +87,9 @@ def main() -> int:
     assert "radio.setRxBoostedGainMode(" in main.split("static RxBoostControl::Result setRxBoostedGain(", 1)[1].split("\n}\n", 1)[0]
     assert main.count("radio.setRxBoostedGainMode(") == 1, "boost writes must go through RxBoostControl::set"
     assert "rxBoost.fault ? 2 : 0" in main
+    station_agc = main.split("AgcMaintenance::run(", 1)[1].split("#else", 1)[0]
+    assert "RxBoostControl::noteAgcReset(" in station_agc
+    assert station_agc.index("noteAgcReset(") < station_agc.index("if (!result.succeeded(")
     agc_body = main.split("void maybeResetAgc() {", 1)[1].split("\n}\n", 1)[0]
     assert "hasAgcResetIntervalControl" not in agc_body
     assert "hasHeltecV43LnaControl" not in agc_body
